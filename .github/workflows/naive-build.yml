@@ -671,9 +671,7 @@ jobs:
         run: go run ./cmd/build-naive publish --branch ${{ env.TARGET_BRANCH }}
 
   release:
-    if: >
-      (github.event_name == 'push' && github.ref_name == 'mirror') ||
-      (github.event_name == 'workflow_dispatch')
+    if: github.event_name == 'push' && github.ref_name == 'mirror' || github.event_name == 'workflow_dispatch'
     needs: [linux, linux-musl, darwin, windows, android]
     runs-on: ubuntu-22.04
     steps:
@@ -750,8 +748,6 @@ jobs:
 
       - name: Create or update latest tag and release (push)
         if: github.event_name == 'push' && github.ref_name == 'mirror'
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           TAG_NAME="latest"
           CHROMIUM_VERSION="${{ steps.chromium.outputs.version }}"
@@ -763,25 +759,25 @@ jobs:
           # Delete existing release with 'latest' tag if present
           gh release delete "$TAG_NAME" --yes 2>/dev/null || true
 
+          # Build release notes
+          NOTES="Latest Cronet bindings for Go.
+        Release assets:
+        - Linux: .so (dynamic, glibc)
+        - Windows: .dll (dynamic)
+        - Android: .so (dynamic)
+        - macOS: .a (static)
+        - iOS/tvOS: .a (static)
+
+        Based on Chromium \${CHROMIUM_VERSION}."
+
           # Create a new (non-draft) release with 'latest' tag
           gh release create "$TAG_NAME" \
-            --title "Latest Build (Chromium $CHROMIUM_VERSION)" \
-            --notes "Latest Cronet bindings for Go.
-
-        Release assets:
-        - **Linux**: \`.so\` (dynamic, glibc)
-        - **Windows**: \`.dll\` (dynamic)
-        - **Android**: \`.so\` (dynamic)
-        - **macOS**: \`.a\` (static)
-        - **iOS/tvOS**: \`.a\` (static)
-
-        Based on Chromium **$CHROMIUM_VERSION**." \
+            --title "Latest Build (Chromium ${CHROMIUM_VERSION})" \
+            --notes "${NOTES}" \
             release/*
 
       - name: Create or update release (workflow_dispatch)
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.version != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="${{ github.event.inputs.version }}"
           CHROMIUM_VERSION="${{ steps.chromium.outputs.version }}"
@@ -792,7 +788,7 @@ jobs:
             echo "Creating release $VERSION..."
             gh release create "$VERSION" \
               --title "$VERSION" \
-              --notes "Cronet Go binding release based on Chromium $CHROMIUM_VERSION"
+              --notes "Cronet Go binding release based on Chromium ${CHROMIUM_VERSION}"
           fi
 
           gh release upload "$VERSION" release/* --clobber

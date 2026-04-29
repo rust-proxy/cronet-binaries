@@ -703,14 +703,6 @@ jobs:
             fi
           done
 
-          # Android shared libraries (.so)
-          for dir in artifacts/cronet-android-*/lib/android_*; do
-            ARCH=$(basename "$dir" | sed 's/android_//')
-            if [ -f "$dir/libcronet.so" ]; then
-              cp "$dir/libcronet.so" "release/libcronet-android-${ARCH}.so"
-            fi
-          done
-
           # Windows DLLs
           for dir in artifacts/cronet-windows-*/lib/windows_*; do
             ARCH=$(basename "$dir" | sed 's/windows_//')

@@ -341,8 +341,8 @@ func buildTarget(t Target) {
 		log.Printf("Running: ninja -C %s cronet_static", outputDirectory)
 		runCommand(srcRoot, "ninja", "-C", outputDirectory, "cronet_static")
 
-		// For Linux glibc and Android, also build shared library for purego mode and release distribution
-		if (t.GOOS == "linux" && t.Libc != "musl") || t.GOOS == "android" {
+		// For Linux glibc, also build shared library for purego mode and release distribution
+		if t.GOOS == "linux" && t.Libc != "musl" {
 			log.Printf("Running: ninja -C %s cronet", outputDirectory)
 			runCommand(srcRoot, "ninja", "-C", outputDirectory, "cronet")
 		}

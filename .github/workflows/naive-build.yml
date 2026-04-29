@@ -671,43 +671,46 @@ jobs:
         run: go run ./cmd/build-naive publish --branch ${{ env.TARGET_BRANCH }}
 
   release:
-    needs: [linux, windows]
-    if: github.event_name == 'workflow_dispatch'
+    if: >
+      (github.event_name == 'push' && github.ref_name == 'mirror') ||
+      (github.event_name == 'workflow_dispatch')
+    needs: [linux, linux-musl, darwin, windows, android]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download Linux artifacts
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: cronet-linux-*
-          path: artifacts/
-          merge-multiple: false
-
-      - name: Download Windows artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: cronet-windows-*
+          pattern: cronet-*
           path: artifacts/
           merge-multiple: false
 
       - name: Get Chromium version
         id: chromium
         run: |
-          VERSION=$(grep -h 'const Version' artifacts/cronet-linux-amd64/lib/linux_amd64/libcronet_cgo.go | sed 's/.*"\(.*\)".*/\1/')
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version=$(cat naiveproxy/CHROMIUM_VERSION)" >> $GITHUB_OUTPUT
 
       - name: Prepare release assets
         run: |
           mkdir -p release
 
-          # Linux glibc shared libraries
+          # Linux glibc shared libraries (.so)
           for dir in artifacts/cronet-linux-*/lib/linux_*; do
-            if [[ "$dir" != *_musl ]]; then
-              ARCH=$(basename "$dir" | sed 's/linux_//')
+            DIRNAME=$(basename "$dir")
+            if [[ "$DIRNAME" != *_musl ]]; then
+              ARCH="${DIRNAME#linux_}"
               if [ -f "$dir/libcronet.so" ]; then
                 cp "$dir/libcronet.so" "release/libcronet-linux-${ARCH}.so"
               fi
+            fi
+          done
+
+          # Android shared libraries (.so)
+          for dir in artifacts/cronet-android-*/lib/android_*; do
+            ARCH=$(basename "$dir" | sed 's/android_//')
+            if [ -f "$dir/libcronet.so" ]; then
+              cp "$dir/libcronet.so" "release/libcronet-android-${ARCH}.so"
             fi
           done
 
@@ -719,26 +722,77 @@ jobs:
             fi
           done
 
+          # Darwin (macOS) static libraries (.a)
+          for dir in artifacts/cronet-darwin-*/lib/darwin_*; do
+            ARCH=$(basename "$dir" | sed 's/darwin_//')
+            if [ -f "$dir/libcronet.a" ]; then
+              cp "$dir/libcronet.a" "release/libcronet-darwin-${ARCH}.a"
+            fi
+          done
+
+          # iOS static libraries (.a)
+          for dir in artifacts/cronet-ios-*/lib/ios_*; do
+            SUBDIR=$(basename "$dir" | sed 's/^ios_//')
+            if [ -f "$dir/libcronet.a" ]; then
+              cp "$dir/libcronet.a" "release/libcronet-ios-${SUBDIR}.a"
+            fi
+          done
+
+          # tvOS static libraries (.a)
+          for dir in artifacts/cronet-tvos-*/lib/tvos_*; do
+            SUBDIR=$(basename "$dir" | sed 's/^tvos_//')
+            if [ -f "$dir/libcronet.a" ]; then
+              cp "$dir/libcronet.a" "release/libcronet-tvos-${SUBDIR}.a"
+            fi
+          done
+
           ls -la release/
 
-      - name: Create or update release draft
-        if: github.event.inputs.version != ''
+      - name: Create or update latest tag and release (push)
+        if: github.event_name == 'push' && github.ref_name == 'mirror'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG_NAME="latest"
+          CHROMIUM_VERSION="${{ steps.chromium.outputs.version }}"
+
+          # Force update the 'latest' tag
+          git tag -f "$TAG_NAME"
+          git push origin -f "$TAG_NAME"
+
+          # Delete existing release with 'latest' tag if present
+          gh release delete "$TAG_NAME" --yes 2>/dev/null || true
+
+          # Create a new (non-draft) release with 'latest' tag
+          gh release create "$TAG_NAME" \
+            --title "Latest Build (Chromium $CHROMIUM_VERSION)" \
+            --notes "Latest Cronet bindings for Go.
+
+        Release assets:
+        - **Linux**: \`.so\` (dynamic, glibc)
+        - **Windows**: \`.dll\` (dynamic)
+        - **Android**: \`.so\` (dynamic)
+        - **macOS**: \`.a\` (static)
+        - **iOS/tvOS**: \`.a\` (static)
+
+        Based on Chromium **$CHROMIUM_VERSION**." \
+            release/*
+
+      - name: Create or update release (workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.version != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="${{ github.event.inputs.version }}"
           CHROMIUM_VERSION="${{ steps.chromium.outputs.version }}"
 
-          # Check if release exists
           if gh release view "$VERSION" &>/dev/null; then
             echo "Release $VERSION exists, uploading assets..."
           else
-            echo "Creating release draft $VERSION..."
+            echo "Creating release $VERSION..."
             gh release create "$VERSION" \
-              --draft \
               --title "$VERSION" \
               --notes "Cronet Go binding release based on Chromium $CHROMIUM_VERSION"
           fi
 
-          # Upload assets (Linux .so and Windows .dll)
           gh release upload "$VERSION" release/* --clobber

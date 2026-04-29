@@ -80,8 +80,8 @@ func packageTargets(targets []Target) {
 				log.Printf("Copied static library for %s", formatTargetLog(t))
 			}
 
-			// For Linux glibc, also copy shared library (for purego mode)
-			if t.GOOS == "linux" && t.Libc != "musl" {
+			// For Linux glibc and Android, also copy shared library (for purego mode and release distribution)
+			if (t.GOOS == "linux" && t.Libc != "musl") || t.GOOS == "android" {
 				sourceShared := filepath.Join(srcRoot, outputDirectory, "libcronet.so")
 				destinationShared := filepath.Join(targetDirectory, "libcronet.so")
 				if _, err := os.Stat(sourceShared); err == nil {

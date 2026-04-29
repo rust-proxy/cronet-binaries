@@ -8,9 +8,9 @@ on:
         type: string
         required: false
   push:
-    branches: [main, dev]
+    branches: [mirror]
   pull_request:
-    branches: [main, dev]
+    branches: [mirror]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}

@@ -738,6 +738,8 @@ jobs:
           ls -la release/
 
       - name: Push tag and create release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           TAG_NAME="latest"
           git tag -f "$TAG_NAME"

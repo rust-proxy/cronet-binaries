@@ -476,8 +476,8 @@ fn build_gn_args(src: &Path, t: &Target) -> Vec<String> {
         _ => {}
     }
 
-    let wrapper = if host_goos() == "windows" { "sccache" } else { "ccache" };
-    if let Some(p) = find_in_path(wrapper) {
+    // Compiler cache wrapper: prefer sccache, fall back to ccache.
+    if let Some(p) = find_in_path("sccache").or_else(|| find_in_path("ccache")) {
         args.push(format!("cc_wrapper=\"{}\"", p.to_string_lossy()));
     }
 

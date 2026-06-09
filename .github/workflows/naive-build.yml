@@ -27,9 +27,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: 'recursive'
-      - uses: actions/setup-go@v5
+      - uses: taiki-e/install-action@v2
         with:
-          go-version: ^1.25
+          tool: just
       - name: Get naiveproxy commit
         id: naive
         run: echo "commit=$(git -C naiveproxy rev-parse HEAD)" >> $GITHUB_OUTPUT
@@ -45,7 +45,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: naiveproxy/src/out
-          key: naive-build-${{ steps.naive.outputs.commit }}-${{ hashFiles('cmd/build-naive/cmd_build.go', 'cmd/build-naive/cmd.go') }}-linux-${{ matrix.arch }}
+          key: naive-build-${{ steps.naive.outputs.commit }}-${{ hashFiles('scripts/build-naive.sh') }}-linux-${{ matrix.arch }}
       - name: Cache ccache files
         if: steps.build-cache.outputs.cache-hit != 'true'
         uses: actions/cache@v4
@@ -63,12 +63,12 @@ jobs:
         run: ccache -z
       - name: Build
         if: steps.build-cache.outputs.cache-hit != 'true'
-        run: go run ./cmd/build-naive --target=linux/${{ matrix.arch }} build
+        run: just compile linux/${{ matrix.arch }}
       - name: Show ccache stats
         if: steps.build-cache.outputs.cache-hit != 'true'
         run: ccache -s
       - name: Package
-        run: go run ./cmd/build-naive --target=linux/${{ matrix.arch }} package
+        run: just package linux/${{ matrix.arch }}
       - uses: actions/upload-artifact@v4
         with:
           name: cronet-linux-${{ matrix.arch }}
@@ -104,9 +104,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: 'recursive'
-      - uses: actions/setup-go@v5
+      - uses: taiki-e/install-action@v2
         with:
-          go-version: ^1.22
+          tool: just
       - name: Get naiveproxy commit
         id: naive
         run: echo "commit=$(git -C naiveproxy rev-parse HEAD)" >> $GITHUB_OUTPUT
@@ -118,7 +118,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: naiveproxy/src/out
-          key: naive-build-${{ steps.naive.outputs.commit }}-${{ hashFiles('cmd/build-naive/cmd_build.go', 'cmd/build-naive/cmd.go') }}-${{ matrix.name }}
+          key: naive-build-${{ steps.naive.outputs.commit }}-${{ hashFiles('scripts/build-naive.sh') }}-${{ matrix.name }}
       - name: Cache ccache files
         if: steps.build-cache.outputs.cache-hit != 'true'
         uses: actions/cache@v4
@@ -134,12 +134,12 @@ jobs:
         run: ccache -z
       - name: Build
         if: steps.build-cache.outputs.cache-hit != 'true'
-        run: go run ./cmd/build-naive --target=${{ matrix.target }} build
+        run: just compile ${{ matrix.target }}
       - name: Show ccache stats
         if: steps.build-cache.outputs.cache-hit != 'true'
         run: ccache -s
       - name: Package
-        run: go run ./cmd/build-naive --target=${{ matrix.target }} package
+        run: just package ${{ matrix.target }}
       - uses: actions/upload-artifact@v4
         with:
           name: cronet-${{ matrix.name }}
@@ -159,9 +159,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: 'recursive'
-      - uses: actions/setup-go@v5
+      - uses: taiki-e/install-action@v2
         with:
-          go-version: ^1.22
+          tool: just
       - name: Get naiveproxy commit
         id: naive
         shell: bash
@@ -175,7 +175,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: naiveproxy/src/out
-          key: naive-build-${{ steps.naive.outputs.commit }}-${{ hashFiles('cmd/build-naive/cmd_build.go', 'cmd/build-naive/cmd.go') }}-windows-${{ matrix.arch }}
+          key: naive-build-${{ steps.naive.outputs.commit }}-${{ hashFiles('scripts/build-naive.sh') }}-windows-${{ matrix.arch }}
       - name: Install tools
         if: steps.build-cache.outputs.cache-hit != 'true'
         run: |
@@ -215,12 +215,14 @@ jobs:
         run: sccache -z
       - name: Build
         if: steps.build-cache.outputs.cache-hit != 'true'
-        run: go run ./cmd/build-naive --target=windows/${{ matrix.arch }} build
+        shell: bash
+        run: just compile windows/${{ matrix.arch }}
       - name: Show sccache stats
         if: steps.build-cache.outputs.cache-hit != 'true'
         run: sccache -s
       - name: Package
-        run: go run ./cmd/build-naive --target=windows/${{ matrix.arch }} package
+        shell: bash
+        run: just package windows/${{ matrix.arch }}
       - uses: actions/upload-artifact@v4
         with:
           name: cronet-windows-${{ matrix.arch }}
@@ -238,9 +240,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: 'recursive'
-      - uses: actions/setup-go@v5
+      - uses: taiki-e/install-action@v2
         with:
-          go-version: ^1.22
+          tool: just
       - name: Get naiveproxy commit
         id: naive
         run: echo "commit=$(git -C naiveproxy rev-parse HEAD)" >> $GITHUB_OUTPUT
@@ -252,7 +254,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: naiveproxy/src/out
-          key: naive-build-${{ steps.naive.outputs.commit }}-${{ hashFiles('cmd/build-naive/cmd_build.go', 'cmd/build-naive/cmd.go') }}-android-${{ matrix.arch }}
+          key: naive-build-${{ steps.naive.outputs.commit }}-${{ hashFiles('scripts/build-naive.sh') }}-android-${{ matrix.arch }}
       - name: Cache ccache files
         if: steps.build-cache.outputs.cache-hit != 'true'
         uses: actions/cache@v4
@@ -270,12 +272,12 @@ jobs:
         run: ccache -z
       - name: Build
         if: steps.build-cache.outputs.cache-hit != 'true'
-        run: go run ./cmd/build-naive --target=android/${{ matrix.arch }} build
+        run: just compile android/${{ matrix.arch }}
       - name: Show ccache stats
         if: steps.build-cache.outputs.cache-hit != 'true'
         run: ccache -s
       - name: Package
-        run: go run ./cmd/build-naive --target=android/${{ matrix.arch }} package
+        run: just package android/${{ matrix.arch }}
       - uses: actions/upload-artifact@v4
         with:
           name: cronet-android-${{ matrix.arch }}
@@ -293,9 +295,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: 'recursive'
-      - uses: actions/setup-go@v5
+      - uses: taiki-e/install-action@v2
         with:
-          go-version: ^1.22
+          tool: just
       - name: Get naiveproxy commit
         id: naive
         run: echo "commit=$(git -C naiveproxy rev-parse HEAD)" >> $GITHUB_OUTPUT
@@ -307,7 +309,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: naiveproxy/src/out
-          key: naive-build-${{ steps.naive.outputs.commit }}-${{ hashFiles('cmd/build-naive/cmd_build.go', 'cmd/build-naive/cmd.go') }}-linux-musl-${{ matrix.arch }}
+          key: naive-build-${{ steps.naive.outputs.commit }}-${{ hashFiles('scripts/build-naive.sh') }}-linux-musl-${{ matrix.arch }}
       - name: Cache ccache files
         if: steps.build-cache.outputs.cache-hit != 'true'
         uses: actions/cache@v4
@@ -325,12 +327,12 @@ jobs:
         run: ccache -z
       - name: Build
         if: steps.build-cache.outputs.cache-hit != 'true'
-        run: go run ./cmd/build-naive --target=linux/${{ matrix.arch }} --libc=musl build
+        run: just compile linux/${{ matrix.arch }} musl
       - name: Show ccache stats
         if: steps.build-cache.outputs.cache-hit != 'true'
         run: ccache -s
       - name: Package
-        run: go run ./cmd/build-naive --target=linux/${{ matrix.arch }} --libc=musl package
+        run: just package linux/${{ matrix.arch }} musl
       - uses: actions/upload-artifact@v4
         with:
           name: cronet-linux-musl-${{ matrix.arch }}

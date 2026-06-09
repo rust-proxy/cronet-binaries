@@ -35,18 +35,25 @@ link the static library (`lib/<target>/link_flags.txt`).
 
 ## How it works
 
-The build is orchestrated by the small Go CLI in [`cmd/build-naive`](cmd/build-naive)
-(the only Go code in the repo — it just drives `get-clang.sh` → `gn gen` →
-`ninja`). It depends only on `github.com/spf13/cobra`.
+The build is orchestrated by [`just`](https://github.com/casey/just), whose
+recipes drive the bash script [`scripts/build-naive.sh`](scripts/build-naive.sh)
+(`get-clang.sh` → `gn gen` → `ninja`). **No Go (or any other) toolchain is
+required** — only `bash`, `just`, and the usual Chromium build deps
+(`gn`/`ninja`, a C/C++ toolchain).
 
-Subcommands:
+`just` recipes:
 
-| Command             | Purpose                                                        |
-|---------------------|---------------------------------------------------------------|
-| `build`             | `gn gen` + `ninja` → produce `libcronet.{a,so,dll}`           |
-| `package`           | Copy libs to `lib/` and headers to `include/`, dump link flags |
-| `download-toolchain`| Download clang + sysroot without building                      |
-| `env`               | Print `CC`/`CXX`/`CGO_LDFLAGS` for cross-compiling consumers    |
+| Recipe                          | Purpose                                                        |
+|---------------------------------|----------------------------------------------------------------|
+| `just build [target] [libc]`    | `compile` + `package` in one go                                |
+| `just compile [target] [libc]`  | `gn gen` + `ninja` → produce `libcronet.{a,so,dll}`            |
+| `just package [target] [libc]`  | Copy libs to `lib/` and headers to `include/`, dump link flags |
+| `just apple`                    | Build every Apple platform                                     |
+| `just download-toolchain …`     | Download clang + sysroot without building                      |
+| `just env [target] [libc]`      | Print `CC`/`CXX`/`CGO_LDFLAGS` for cross-compiling consumers    |
+
+The script can also be invoked directly without `just`:
+`bash scripts/build-naive.sh build --target linux/amd64`.
 
 ## Build instructions
 
@@ -54,11 +61,11 @@ Subcommands:
 git clone --recursive --depth=1 <this-repo>
 cd cronet-libs
 
-# Linux (host target). Add --target=os/arch to cross-compile,
-# or --libc=musl for static musl builds.
-go run ./cmd/build-naive build
-go run ./cmd/build-naive package
-# or simply: make
+just                       # list recipes
+just build                 # host target (compile + package)
+just build linux/arm64     # cross-compile
+just build linux/amd64 musl # static musl Linux build
+just apple                 # all Apple platforms
 ```
 
 Outputs land in:
@@ -77,12 +84,11 @@ The raw ninja output also remains under
 ### Cross-compiling
 
 ```bash
-go run ./cmd/build-naive --target=linux/arm64 download-toolchain
-go run ./cmd/build-naive --target=linux/arm64 build
-go run ./cmd/build-naive --target=linux/arm64 package
+just download-toolchain linux/arm64
+just build linux/arm64
 
 # musl (static):
-go run ./cmd/build-naive --target=linux/amd64 --libc=musl build
+just build linux/amd64 musl
 ```
 
 ### Directories worth caching (CI)

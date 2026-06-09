@@ -166,3 +166,6 @@ name = "cronet-windows-amd64"
 os = "windows-2022"
 target = "windows/arm64"
 name = "cronet-windows-arm64"
+# sccache >=0.13 mishandles BoringSSL's assembler output paths on win/arm64;
+# pin the last known-good version (others use latest).
+sccache_version = "v0.12.0"

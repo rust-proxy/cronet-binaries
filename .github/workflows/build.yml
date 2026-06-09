@@ -62,9 +62,6 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@nightly
 
-      - name: Setup ninja
-        uses: seanmiddleditch/gha-setup-ninja@v6
-
       - name: Install zstd (musl)
         if: runner.os == 'Linux' && matrix.libc == 'musl'
         run: |

@@ -62,44 +62,26 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@nightly
 
-      - name: Get naiveproxy commit
-        id: naive
-        run: echo "commit=$(git -C naiveproxy rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Setup ninja
+        uses: seanmiddleditch/gha-setup-ninja@v6
 
-      - name: Cache build artifacts
-        id: build-cache
-        uses: actions/cache@v4
-        with:
-          path: naiveproxy/src/out
-          key: naive-build-${{ steps.naive.outputs.commit }}-${{ hashFiles('scripts/build-cronet.rs') }}-${{ matrix.name }}
-
-      - name: Install ninja (Linux)
-        if: steps.build-cache.outputs.cache-hit != 'true' && runner.os == 'Linux'
+      - name: Install zstd (musl)
+        if: runner.os == 'Linux' && matrix.libc == 'musl'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build ${{ matrix.libc == 'musl' && 'zstd' || '' }}
-
-      - name: Install ninja (macOS)
-        if: steps.build-cache.outputs.cache-hit != 'true' && runner.os == 'macOS'
-        run: brew install ninja
-
-      - name: Install ninja (Windows)
-        if: steps.build-cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
-        run: choco install ninja -y
+          sudo apt-get install -y zstd
 
       # Only Linux glibc targets pull a Debian sysroot that needs the keyring.
       - name: Regenerate Debian keyring
-        if: steps.build-cache.outputs.cache-hit != 'true' && startsWith(matrix.target, 'linux/') && matrix.libc != 'musl'
+        if: startsWith(matrix.target, 'linux/') && matrix.libc != 'musl'
         run: |
           rm -f ./naiveproxy/src/build/linux/sysroot_scripts/keyring.gpg
           GPG_TTY=/dev/null ./naiveproxy/src/build/linux/sysroot_scripts/generate_keyring.sh
 
       - name: Setup sccache
-        if: steps.build-cache.outputs.cache-hit != 'true'
         uses: mozilla-actions/sccache-action@v0.0.10
 
       - name: Build
-        if: steps.build-cache.outputs.cache-hit != 'true'
         run: |
           sccache -z
           just compile "${{ matrix.target }}" "${{ matrix.libc }}"

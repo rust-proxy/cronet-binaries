@@ -1,106 +1,107 @@
-# cronet-go
+# cronet-libs
 
-[![Reference](https://pkg.go.dev/badge/github.com/sagernet/cronet-go.svg)](https://pkg.go.dev/github.com/sagernet/cronet-go)
+Prebuilt **cronet** static / shared libraries from [naiveproxy](https://github.com/klzgrad/naiveproxy)
+(Chromium's network stack: HTTP/2, HTTP/3 QUIC, ECH, …).
 
-Go bindings for [naiveproxy](https://github.com/klzgrad/naiveproxy).
+This repository contains **only the C library build pipeline** — there are no Go
+bindings here. It produces:
+
+- `libcronet.a`  — static library (Linux glibc/musl, macOS, iOS, tvOS, Android)
+- `libcronet.so` — shared library (Linux glibc)
+- `libcronet.dll`— shared library (Windows)
+
+together with the C headers (`include/`) and the system link flags required to
+link the static library (`lib/<target>/link_flags.txt`).
 
 ## Supported Platforms
 
-| Target        | OS      | CPU   |
-|---------------|---------|-------|
-| android/386   | android | x86   |
-| android/amd64 | android | x64   |
-| android/arm   | android | arm   |
-| android/arm64 | android | arm64 |
-| darwin/amd64  | mac     | x64   |
-| darwin/arm64  | mac     | arm64 |
-| ios/arm64     | ios     | arm64 |
-| ios/amd64     | ios     | amd64 |
-| linux/386     | linux   | x86   |
-| linux/amd64   | linux   | x64   |
-| linux/arm     | linux   | arm   |
+| Target        | OS      | CPU     |
+|---------------|---------|---------|
+| android/386   | android | x86     |
+| android/amd64 | android | x64     |
+| android/arm   | android | arm     |
+| android/arm64 | android | arm64   |
+| darwin/amd64  | mac     | x64     |
+| darwin/arm64  | mac     | arm64   |
+| ios/arm64     | ios     | arm64   |
+| ios/amd64     | ios     | amd64   |
+| linux/386     | linux   | x86     |
+| linux/amd64   | linux   | x64     |
+| linux/arm     | linux   | arm     |
 | linux/arm64   | linux   | arm64   |
 | linux/loong64 | linux   | loong64 |
 | windows/amd64 | win     | x64     |
-| windows/arm64 | win     | arm64 |
+| windows/arm64 | win     | arm64   |
 
-## System Requirements
+## How it works
 
-| Platform      | Minimum Version |
-|---------------|-----------------|
-| macOS         | 12.0 (Monterey) |
-| iOS/tvOS      | 15.0            |
-| Windows       | 10              |
-| Android       | 5.0 (API 21)    |
-| Linux (glibc)       | glibc 2.31 (loong64: 2.36) |
-| Linux (musl)        | any (loong64: 1.2.5)       |
+The build is orchestrated by the small Go CLI in [`cmd/build-naive`](cmd/build-naive)
+(the only Go code in the repo — it just drives `get-clang.sh` → `gn gen` →
+`ninja`). It depends only on `github.com/spf13/cobra`.
 
-## Downstream Build Requirements
+Subcommands:
 
-| Platform                             | Requirements                    | Go Build Flags                    |
-|--------------------------------------|---------------------------------|-----------------------------------|
-| Linux (glibc)                        | Chromium toolchain              | -                                 |
-| Linux (musl)                         | Chromium toolchain              | `-tags with_musl`                 |
-| macOS / iOS                          | macOS Xcode                     | -                                 |
-| iOS simulator/ tvOS / tvOS simulator | macOS Xcode + SagerNet/gomobile | -                                 |
-| Windows                              | -                               | `CGO_ENABLED=0 -tags with_purego` |
-| Android                              | Android NDK                     | -                                 |
+| Command             | Purpose                                                        |
+|---------------------|---------------------------------------------------------------|
+| `build`             | `gn gen` + `ninja` → produce `libcronet.{a,so,dll}`           |
+| `package`           | Copy libs to `lib/` and headers to `include/`, dump link flags |
+| `download-toolchain`| Download clang + sysroot without building                      |
+| `env`               | Print `CC`/`CXX`/`CGO_LDFLAGS` for cross-compiling consumers    |
 
-## Linux Build instructions
+## Build instructions
 
 ```bash
-git clone --recursive --depth=1 https://github.com/sagernet/cronet-go.git
-cd cronet-go
-go run ./cmd/build-naive --target=linux/amd64 download-toolchain
-#go run ./cmd/build-naive --target=linux/amd64 --libc=musl download-toolchain
+git clone --recursive --depth=1 <this-repo>
+cd cronet-libs
 
-# Outputs CC, CXX, and CGO_LDFLAGS=-fuse-ld=lld
-export $(go run ./cmd/build-naive --target=linux/amd64 env)
-#export $(go run ./cmd/build-naive --target=linux/amd64 --libc=musl env)
-
-cd /path/to/your/project
-go build
-# go build -tags with_musl
+# Linux (host target). Add --target=os/arch to cross-compile,
+# or --libc=musl for static musl builds.
+go run ./cmd/build-naive build
+go run ./cmd/build-naive package
+# or simply: make
 ```
 
-### Directories to cache
+Outputs land in:
+
+```
+lib/<os>_<arch>/libcronet.a        # static lib
+lib/<os>_<arch>/libcronet.so       # Linux glibc shared lib
+lib/<os>_<arch>/libcronet.dll      # Windows shared lib
+lib/<os>_<arch>/link_flags.txt     # system libs/frameworks needed to link .a
+include/*.h                        # C headers
+```
+
+The raw ninja output also remains under
+`naiveproxy/src/out/cronet-<os>-<cpu>/` if you prefer to grab it directly.
+
+### Cross-compiling
+
+```bash
+go run ./cmd/build-naive --target=linux/arm64 download-toolchain
+go run ./cmd/build-naive --target=linux/arm64 build
+go run ./cmd/build-naive --target=linux/arm64 package
+
+# musl (static):
+go run ./cmd/build-naive --target=linux/amd64 --libc=musl build
+```
+
+### Directories worth caching (CI)
 
 ```yaml
-- cronet-go/naiveproxy/src/third_party/llvm-build/
-- cronet-go/naiveproxy/src/gn/out/
-- cronet-go/naiveproxy/src/chrome/build/pgo_profiles/
-- cronet-go/naiveproxy/src/out/sysroot-build/
+- naiveproxy/src/third_party/llvm-build/
+- naiveproxy/src/gn/out/
+- naiveproxy/src/chrome/build/pgo_profiles/
+- naiveproxy/src/out/sysroot-build/
 ```
 
-## Windows / purego Build Instructions
+## Linking against the static library
 
-For Windows or pure Go builds (no CGO), you need to distribute the dynamic library alongside your binary.
-
-### Download Library
-
-Download `libcronet.dll` (Windows) or `libcronet.so` (Linux) from [GitHub Releases](https://github.com/sagernet/cronet-go/releases).
-
-### Build with purego
+`libcronet.a` needs a number of system libraries; the exact set is written to
+`lib/<target>/link_flags.txt` at package time. Example (Linux):
 
 ```bash
-# Windows (purego is required)
-CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -tags with_purego -o myapp.exe
-
-# Linux with purego (optional, for dynamic linking)
-CGO_ENABLED=0 go build -tags with_purego -o myapp
+cc myapp.c -Iinclude lib/linux_amd64/libcronet.a $(cat lib/linux_amd64/link_flags.txt | grep -v '^#')
 ```
 
-### Distribution
-
-Place the library file in the same directory as your executable:
-- Windows: `libcronet.dll`
-- Linux: `libcronet.so`
-
-### For Downstream Developers
-
-If you need to programmatically extract libraries from Go module dependencies (e.g., for CI/CD pipelines):
-
-```bash
-go run github.com/sagernet/cronet-go/cmd/build-naive@latest extract-lib --target windows/amd64 -n libcronet_amd64.dll
-go run github.com/sagernet/cronet-go/cmd/build-naive@latest extract-lib --target linux/amd64 -n libcronet_amd64.so
-```
+On Windows / for dynamic linking, ship `libcronet.dll` / `libcronet.so` next to
+your executable.

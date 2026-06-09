@@ -8,9 +8,9 @@ on:
         type: string
         required: false
   push:
-    branches: [mirror]
+    branches: [mirror, lib-only]
   pull_request:
-    branches: [mirror]
+    branches: [mirror, lib-only]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
@@ -68,62 +68,13 @@ jobs:
         if: steps.build-cache.outputs.cache-hit != 'true'
         run: ccache -s
       - name: Package
-        run: |
-          go run ./cmd/build-naive --target=linux/${{ matrix.arch }} package --local
-          go run ./cmd/build-naive --target=linux/${{ matrix.arch }} package
-      - name: Cache toolchain
-        uses: actions/cache@v4
-        with:
-          path: |
-            naiveproxy/src/third_party/llvm-build
-            naiveproxy/src/gn/out
-            naiveproxy/src/chrome/build/pgo_profiles
-            naiveproxy/src/out/sysroot-build
-          key: toolchain-linux-${{ matrix.arch }}-${{ steps.chromium.outputs.version }}
-          restore-keys: toolchain-linux-${{ matrix.arch }}-
-      - name: Download clang and sysroot
-        run: go run ./cmd/build-naive --target=linux/${{ matrix.arch }} download-toolchain
-      - name: Install QEMU for cross-platform testing
-        run: |
-          sudo apt update
-          sudo apt install -y qemu-user-binfmt
-      - name: Build test binary
-        run: |
-          eval $(go run ./cmd/build-naive --target=linux/${{ matrix.arch }} env --export)
-          GO_TEST_LDFLAGS=
-          if [ "${{ matrix.arch }}" = "mipsle" ] || [ "${{ matrix.arch }}" = "mips64le" ]; then
-            GO_TEST_LDFLAGS=-ldflags=-w
-          fi
-          CGO_ENABLED=1 GOOS=linux GOARCH=${{ matrix.arch }} go test -c $GO_TEST_LDFLAGS -o cronet.test .
-      - name: Run test binary
-        run: |
-          eval $(go run ./cmd/build-naive --target=linux/${{ matrix.arch }} env --export)
-          if [ "${{ matrix.arch }}" != "amd64" ] && [ "${{ matrix.arch }}" != "386" ]; then
-            export QEMU_LD_PREFIX
-          fi
-          ./cronet.test -test.v -test.run=TestEngineVersion
-      - name: Build purego test binary
-        if: matrix.arch == 'amd64' || matrix.arch == 'arm64' || matrix.arch == 'loong64'
-        run: |
-          cp lib/linux_${{ matrix.arch }}/libcronet.so .
-          CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.arch }} go test -tags with_purego -c -o cronet.purego.test .
-      - name: Run purego test binary
-        if: matrix.arch == 'amd64' || matrix.arch == 'arm64' || matrix.arch == 'loong64'
-        run: |
-          if [ "${{ matrix.arch }}" != "amd64" ]; then
-            eval $(go run ./cmd/build-naive --target=linux/${{ matrix.arch }} env --export)
-            export QEMU_LD_PREFIX
-          fi
-          export LD_LIBRARY_PATH=$PWD
-          ./cronet.purego.test -test.v -test.run=TestEngineVersion
+        run: go run ./cmd/build-naive --target=linux/${{ matrix.arch }} package
       - uses: actions/upload-artifact@v4
         with:
           name: cronet-linux-${{ matrix.arch }}
           path: |
             lib/
             include/
-            include_cgo.go
-            lib_*_cgo.go
 
   darwin:
     runs-on: macos-15
@@ -188,22 +139,13 @@ jobs:
         if: steps.build-cache.outputs.cache-hit != 'true'
         run: ccache -s
       - name: Package
-        run: |
-          go run ./cmd/build-naive --target=${{ matrix.target }} package --local
-          go run ./cmd/build-naive --target=${{ matrix.target }} package
-      - name: Build and run test binary
-        if: matrix.target == 'darwin/arm64'
-        run: |
-          CGO_ENABLED=1 go test -c -o cronet.test .
-          ./cronet.test -test.v -test.run=TestEngineVersion
+        run: go run ./cmd/build-naive --target=${{ matrix.target }} package
       - uses: actions/upload-artifact@v4
         with:
           name: cronet-${{ matrix.name }}
           path: |
             lib/
             include/
-            include_cgo.go
-            lib_*_cgo.go
 
   windows:
     runs-on: windows-2022
@@ -279,39 +221,19 @@ jobs:
         run: sccache -s
       - name: Package
         run: go run ./cmd/build-naive --target=windows/${{ matrix.arch }} package
-      - name: Build and run test binary
-        if: matrix.arch != 'arm64'
-        shell: bash
-        run: |
-          # Copy DLL to current directory for fallback loading
-          cp lib/windows_${{ matrix.arch }}/libcronet.dll .
-          CGO_ENABLED=0 \
-          GOOS=windows \
-          GOARCH=${{ matrix.arch }} \
-          go test -tags with_purego -c -o cronet.test.exe .
-          ./cronet.test.exe -test.v -test.run=TestEngineVersion
       - uses: actions/upload-artifact@v4
         with:
           name: cronet-windows-${{ matrix.arch }}
           path: |
             lib/
             include/
-            include_cgo.go
 
   android:
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - arch: arm64
-            cc: aarch64-linux-android23-clang
-          - arch: amd64
-            cc: x86_64-linux-android23-clang
-          - arch: arm
-            cc: armv7a-linux-androideabi23-clang
-          - arch: "386"
-            cc: i686-linux-android23-clang
+        arch: [arm64, amd64, arm, "386"]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -353,26 +275,13 @@ jobs:
         if: steps.build-cache.outputs.cache-hit != 'true'
         run: ccache -s
       - name: Package
-        run: |
-          go run ./cmd/build-naive --target=android/${{ matrix.arch }} package --local
-          go run ./cmd/build-naive --target=android/${{ matrix.arch }} package
-      - name: Setup Android NDK
-        uses: nttld/setup-ndk@v1
-        id: setup-ndk
-        with:
-          ndk-version: r28
-      - name: Build test binary
-        run: |
-          CC=${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/${{ matrix.cc }} \
-          CGO_ENABLED=1 GOOS=android GOARCH=${{ matrix.arch }} go test -c -o cronet.test .
+        run: go run ./cmd/build-naive --target=android/${{ matrix.arch }} package
       - uses: actions/upload-artifact@v4
         with:
           name: cronet-android-${{ matrix.arch }}
           path: |
             lib/
             include/
-            include_cgo.go
-            lib_*_cgo.go
 
   linux-musl:
     runs-on: ubuntu-24.04
@@ -421,224 +330,16 @@ jobs:
         if: steps.build-cache.outputs.cache-hit != 'true'
         run: ccache -s
       - name: Package
-        run: |
-          go run ./cmd/build-naive --target=linux/${{ matrix.arch }} --libc=musl package --local
-          go run ./cmd/build-naive --target=linux/${{ matrix.arch }} --libc=musl package
-      - name: Cache toolchain
-        uses: actions/cache@v4
-        with:
-          path: |
-            naiveproxy/src/third_party/llvm-build
-            naiveproxy/src/gn/out
-            naiveproxy/src/chrome/build/pgo_profiles
-            naiveproxy/src/out/sysroot-build
-          key: toolchain-linux-musl-${{ matrix.arch }}-${{ steps.chromium.outputs.version }}
-          restore-keys: toolchain-linux-musl-${{ matrix.arch }}-
-      - name: Download toolchain
-        run: go run ./cmd/build-naive --target=linux/${{ matrix.arch }} --libc=musl download-toolchain
-      - name: Install QEMU for cross-platform testing
-        run: |
-          sudo apt update
-          sudo apt install -y qemu-user-binfmt
-      - name: Build test binary
-        run: |
-          eval $(go run ./cmd/build-naive --target=linux/${{ matrix.arch }} --libc=musl env --export)
-          [[ "${{ matrix.arch }}" == "mipsle" ]] && export GOMIPS=softfloat || true
-          GO_TEST_LDFLAGS=
-          [[ "${{ matrix.arch }}" == "mipsle" ]] && GO_TEST_LDFLAGS=-ldflags=-w || true
-          CGO_ENABLED=1 GOOS=linux GOARCH=${{ matrix.arch }} go test -c $GO_TEST_LDFLAGS -tags with_musl -o cronet.test .
-      - name: Run test binary
-        continue-on-error: true  # musl/QEMU test is flaky, don't block CI
-        run: |
-          # Static binary - can run directly with QEMU binfmt or explicit QEMU for cross-arch
-          case "${{ matrix.arch }}" in
-            amd64)   QEMU=qemu-x86_64 ;;
-            arm64)   QEMU=qemu-aarch64 ;;
-            386)     QEMU=qemu-i386 ;;
-            arm)     QEMU=qemu-arm ;;
-            loong64) QEMU=qemu-loongarch64 ;;
-          esac
-          timeout 60 $QEMU ./cronet.test -test.v -test.run=TestEngineVersion -test.timeout=30s
+        run: go run ./cmd/build-naive --target=linux/${{ matrix.arch }} --libc=musl package
       - uses: actions/upload-artifact@v4
         with:
           name: cronet-linux-musl-${{ matrix.arch }}
           path: |
             lib/
             include/
-            include_cgo.go
-            lib_*_cgo.go
-
-  integration-test:
-    if: github.event_name != 'workflow_dispatch'
-    needs: [linux, darwin, windows]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Linux
-          - name: linux-amd64-cgo
-            os: ubuntu-22.04
-            artifact: cronet-linux-amd64
-            target: linux/amd64
-            mode: cgo
-          - name: linux-amd64-purego
-            os: ubuntu-22.04
-            artifact: cronet-linux-amd64
-            target: linux/amd64
-            mode: purego
-          - name: linux-arm64-purego
-            os: ubuntu-22.04-arm
-            artifact: cronet-linux-arm64
-            target: linux/arm64
-            mode: purego
-          # macOS ARM64
-          - name: darwin-arm64-macos15
-            os: macos-15
-            artifact: cronet-darwin-arm64
-            target: darwin/arm64
-            mode: cgo
-          - name: darwin-arm64-macos26
-            os: macos-26
-            artifact: cronet-darwin-arm64
-            target: darwin/arm64
-            mode: cgo
-          # macOS x64 (Intel)
-          - name: darwin-amd64-macos15
-            os: macos-15-intel
-            artifact: cronet-darwin-amd64
-            target: darwin/amd64
-            mode: cgo
-          # Windows x64
-          - name: windows-amd64-2022
-            os: windows-2022
-            artifact: cronet-windows-amd64
-            target: windows/amd64
-            mode: purego
-          - name: windows-amd64-2025
-            os: windows-2025
-            artifact: cronet-windows-amd64
-            target: windows/amd64
-            mode: purego
-          # Windows ARM64
-          - name: windows-arm64
-            os: windows-11-arm
-            artifact: cronet-windows-arm64
-            target: windows/arm64
-            mode: purego
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
-    env:
-      CRONET_TEST_ARTIFACT_DIR: ${{ github.workspace }}/test-artifacts/${{ matrix.name }}
-      CRONET_TEST_CAPTURE_NETLOG: "1"
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: ^1.24
-
-      - name: Download artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}
-          path: .
-
-      - name: Get Chromium version
-        id: chromium
-        shell: bash
-        run: echo "version=$(cat naiveproxy/CHROMIUM_VERSION)" >> $GITHUB_OUTPUT
-
-      # Linux: restore toolchain cache (needed for env command)
-      - name: Restore toolchain cache (Linux)
-        if: runner.os == 'Linux'
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            naiveproxy/src/third_party/llvm-build
-            naiveproxy/src/gn/out
-            naiveproxy/src/chrome/build/pgo_profiles
-            naiveproxy/src/out/sysroot-build
-          key: toolchain-linux-${{ contains(matrix.target, 'arm64') && 'arm64' || 'amd64' }}-${{ steps.chromium.outputs.version }}
-          restore-keys: toolchain-linux-${{ contains(matrix.target, 'arm64') && 'arm64' || 'amd64' }}-
-
-      - name: Download toolchain (Linux)
-        if: runner.os == 'Linux'
-        run: go run ./cmd/build-naive --target=${{ matrix.target }} download-toolchain
-
-      # Install iperf3
-      - name: Install iperf3 (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt update
-          sudo apt install -y iperf3
-
-      - name: Install iperf3 (macOS)
-        if: runner.os == 'macOS'
-        run: brew install iperf3
-
-      - name: Install iperf3 (Windows)
-        if: runner.os == 'Windows'
-        run: choco install iperf3
-
-      # CGO mode tests
-      - name: Run integration tests (CGO)
-        if: matrix.mode == 'cgo'
-        timeout-minutes: 20
-        run: |
-          mkdir -p "$CRONET_TEST_ARTIFACT_DIR"
-          eval $(go run ./cmd/build-naive --target=${{ matrix.target }} env --export)
-          cd test
-          LOG_PATH="$CRONET_TEST_ARTIFACT_DIR/go-test.log"
-          if ! CGO_ENABLED=1 go test -v -timeout=12m >"$LOG_PATH" 2>&1; then
-            tail -n 400 "$LOG_PATH" || true
-            exit 1
-          fi
-
-      # purego mode tests
-      - name: Run integration tests (purego - Linux)
-        if: matrix.mode == 'purego' && runner.os == 'Linux'
-        timeout-minutes: 20
-        working-directory: test
-        run: |
-          mkdir -p "$CRONET_TEST_ARTIFACT_DIR"
-          export LD_LIBRARY_PATH=$PWD/../lib/linux_${{ contains(matrix.target, 'arm64') && 'arm64' || 'amd64' }}
-          LOG_PATH="$CRONET_TEST_ARTIFACT_DIR/go-test.log"
-          if ! CGO_ENABLED=0 go test -tags with_purego -v -timeout=12m >"$LOG_PATH" 2>&1; then
-            tail -n 400 "$LOG_PATH" || true
-            exit 1
-          fi
-
-      - name: Run integration tests (purego - Windows)
-        if: matrix.mode == 'purego' && runner.os == 'Windows'
-        timeout-minutes: 20
-        working-directory: test
-        shell: bash
-        run: |
-          # Determine library directory based on target architecture
-          case "${{ matrix.target }}" in
-            */arm64) LIB_DIR="windows_arm64" ;;
-            */amd64) LIB_DIR="windows_amd64" ;;
-          esac
-          export PATH="$PWD/../lib/${LIB_DIR}:$PATH"
-          mkdir -p "$CRONET_TEST_ARTIFACT_DIR"
-          LOG_PATH="$CRONET_TEST_ARTIFACT_DIR/go-test.log"
-          if ! go test -tags with_purego -v -timeout=12m >"$LOG_PATH" 2>&1; then
-            tail -n 400 "$LOG_PATH" || true
-            exit 1
-          fi
-
-      - name: Upload integration logs (test failure)
-        if: always() && (failure() || cancelled())
-        uses: actions/upload-artifact@v4
-        with:
-          name: integration-logs-${{ matrix.name }}
-          path: test-artifacts/${{ matrix.name }}/
-          if-no-files-found: warn
 
   release-libs:
-    if: github.event_name == 'push' && github.ref_name == 'mirror'
+    if: github.event_name == 'push' && (github.ref_name == 'mirror' || github.ref_name == 'lib-only')
     needs: [linux, linux-musl, darwin, windows, android]
     runs-on: ubuntu-22.04
     steps:

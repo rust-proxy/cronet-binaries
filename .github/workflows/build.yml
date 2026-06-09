@@ -16,10 +16,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-env:
-  # All platforms use sccache with the GitHub Actions cache service as backend.
-  SCCACHE_GHA_ENABLED: "true"
-
 defaults:
   run:
     shell: bash
@@ -75,8 +71,25 @@ jobs:
           rm -f ./naiveproxy/src/build/linux/sysroot_scripts/keyring.gpg
           GPG_TTY=/dev/null ./naiveproxy/src/build/linux/sysroot_scripts/generate_keyring.sh
 
-      - name: Setup sccache
+      - name: Install sccache
         uses: mozilla-actions/sccache-action@v0.0.10
+
+      # Local-disk mode: sccache writes one cache dir, persisted as a single
+      # actions/cache blob per target (the ghac backend's per-object writes get
+      # throttled by GitHub's cache service on a build this large).
+      - name: Configure sccache (local disk)
+        run: |
+          echo "SCCACHE_DIR=${{ runner.temp }}/sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_CACHE_SIZE=2G" >> "$GITHUB_ENV"
+
+      - name: Cache sccache directory
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/sccache
+          key: sccache-${{ matrix.name }}-${{ hashFiles('scripts/build-cronet.rs') }}-${{ github.run_id }}
+          restore-keys: |
+            sccache-${{ matrix.name }}-${{ hashFiles('scripts/build-cronet.rs') }}-
+            sccache-${{ matrix.name }}-
 
       - name: Build
         run: |

@@ -19,8 +19,6 @@ concurrency:
 env:
   # All platforms use sccache with the GitHub Actions cache service as backend.
   SCCACHE_GHA_ENABLED: "true"
-  # Pinned: the version validated for the windows/arm64 build.
-  SCCACHE_VERSION: "v0.12.0"
 
 defaults:
   run:
@@ -65,8 +63,6 @@ jobs:
       - name: Setup sccache
         if: steps.build-cache.outputs.cache-hit != 'true'
         uses: mozilla-actions/sccache-action@v0.0.10
-        with:
-          version: ${{ env.SCCACHE_VERSION }}
       - name: Build
         if: steps.build-cache.outputs.cache-hit != 'true'
         run: |
@@ -132,8 +128,6 @@ jobs:
       - name: Setup sccache
         if: steps.build-cache.outputs.cache-hit != 'true'
         uses: mozilla-actions/sccache-action@v0.0.10
-        with:
-          version: ${{ env.SCCACHE_VERSION }}
       - name: Build
         if: steps.build-cache.outputs.cache-hit != 'true'
         run: |
@@ -183,8 +177,6 @@ jobs:
       - name: Setup sccache
         if: steps.build-cache.outputs.cache-hit != 'true'
         uses: mozilla-actions/sccache-action@v0.0.10
-        with:
-          version: ${{ env.SCCACHE_VERSION }}
       - name: Build
         if: steps.build-cache.outputs.cache-hit != 'true'
         run: |
@@ -234,8 +226,6 @@ jobs:
       - name: Setup sccache
         if: steps.build-cache.outputs.cache-hit != 'true'
         uses: mozilla-actions/sccache-action@v0.0.10
-        with:
-          version: ${{ env.SCCACHE_VERSION }}
       - name: Build
         if: steps.build-cache.outputs.cache-hit != 'true'
         run: |
@@ -285,8 +275,6 @@ jobs:
       - name: Setup sccache
         if: steps.build-cache.outputs.cache-hit != 'true'
         uses: mozilla-actions/sccache-action@v0.0.10
-        with:
-          version: ${{ env.SCCACHE_VERSION }}
       - name: Build
         if: steps.build-cache.outputs.cache-hit != 'true'
         run: |

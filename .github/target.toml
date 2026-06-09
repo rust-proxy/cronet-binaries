@@ -1,0 +1,171 @@
+# Build target matrix for the cronet libraries.
+#
+# Converted to JSON at CI time (`toml2json target.toml | jaq -c '.target'`) and
+# fed into the build job's `matrix.include`, so every platform shares one job
+# definition.
+#
+# Fields:
+#   os     - GitHub runner (runs-on)
+#   target - passed to `just compile/package` (os/arch[/variant])
+#   name   - artifact name (must start with `cronet-`); also the cache suffix
+#   libc   - optional; "musl" for static musl Linux builds
+
+# ==================== Linux (glibc) ====================
+[[target]]
+os = "ubuntu-24.04"
+target = "linux/amd64"
+name = "cronet-linux-amd64"
+
+[[target]]
+os = "ubuntu-24.04"
+target = "linux/arm64"
+name = "cronet-linux-arm64"
+
+[[target]]
+os = "ubuntu-24.04"
+target = "linux/386"
+name = "cronet-linux-386"
+
+[[target]]
+os = "ubuntu-24.04"
+target = "linux/arm"
+name = "cronet-linux-arm"
+
+[[target]]
+os = "ubuntu-24.04"
+target = "linux/loong64"
+name = "cronet-linux-loong64"
+
+[[target]]
+os = "ubuntu-24.04"
+target = "linux/mipsle"
+name = "cronet-linux-mipsle"
+
+[[target]]
+os = "ubuntu-24.04"
+target = "linux/mips64le"
+name = "cronet-linux-mips64le"
+
+[[target]]
+os = "ubuntu-24.04"
+target = "linux/riscv64"
+name = "cronet-linux-riscv64"
+
+# ==================== Linux (musl) ====================
+[[target]]
+os = "ubuntu-24.04"
+target = "linux/amd64"
+name = "cronet-linux-musl-amd64"
+libc = "musl"
+
+[[target]]
+os = "ubuntu-24.04"
+target = "linux/arm64"
+name = "cronet-linux-musl-arm64"
+libc = "musl"
+
+[[target]]
+os = "ubuntu-24.04"
+target = "linux/386"
+name = "cronet-linux-musl-386"
+libc = "musl"
+
+[[target]]
+os = "ubuntu-24.04"
+target = "linux/arm"
+name = "cronet-linux-musl-arm"
+libc = "musl"
+
+[[target]]
+os = "ubuntu-24.04"
+target = "linux/loong64"
+name = "cronet-linux-musl-loong64"
+libc = "musl"
+
+[[target]]
+os = "ubuntu-24.04"
+target = "linux/mipsle"
+name = "cronet-linux-musl-mipsle"
+libc = "musl"
+
+[[target]]
+os = "ubuntu-24.04"
+target = "linux/riscv64"
+name = "cronet-linux-musl-riscv64"
+libc = "musl"
+
+# ==================== Android ====================
+[[target]]
+os = "ubuntu-22.04"
+target = "android/arm64"
+name = "cronet-android-arm64"
+
+[[target]]
+os = "ubuntu-22.04"
+target = "android/amd64"
+name = "cronet-android-amd64"
+
+[[target]]
+os = "ubuntu-22.04"
+target = "android/arm"
+name = "cronet-android-arm"
+
+[[target]]
+os = "ubuntu-22.04"
+target = "android/386"
+name = "cronet-android-386"
+
+# ==================== Apple (macOS / iOS / tvOS) ====================
+[[target]]
+os = "macos-15"
+target = "darwin/amd64"
+name = "cronet-darwin-amd64"
+
+[[target]]
+os = "macos-15"
+target = "darwin/arm64"
+name = "cronet-darwin-arm64"
+
+[[target]]
+os = "macos-15"
+target = "ios/arm64"
+name = "cronet-ios-arm64"
+
+[[target]]
+os = "macos-15"
+target = "ios/arm64/simulator"
+name = "cronet-ios-arm64-simulator"
+
+[[target]]
+os = "macos-15"
+target = "ios/amd64"
+name = "cronet-ios-amd64-simulator"
+
+[[target]]
+os = "macos-15"
+target = "tvos/arm64"
+name = "cronet-tvos-arm64"
+
+[[target]]
+os = "macos-15"
+target = "tvos/arm64/simulator"
+name = "cronet-tvos-arm64-simulator"
+
+[[target]]
+os = "macos-15"
+target = "tvos/amd64"
+name = "cronet-tvos-amd64-simulator"
+
+# ==================== Windows ====================
+[[target]]
+os = "windows-2022"
+target = "windows/amd64"
+name = "cronet-windows-amd64"
+
+[[target]]
+os = "windows-2022"
+target = "windows/arm64"
+name = "cronet-windows-arm64"
+# sccache >=0.13 mishandles BoringSSL's assembler output paths on win/arm64;
+# pin the last known-good version (others use latest).
+sccache_version = "v0.12.0"

@@ -21,335 +21,106 @@ defaults:
     shell: bash
 
 jobs:
-  linux:
-    runs-on: ubuntu-24.04
+  # Read .github/target.toml and expose it as a matrix.include payload, so all
+  # platforms share the single `build` job below.
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.set.outputs.targets }}
+      sccache_size: ${{ steps.set.outputs.sccache_size }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: toml2json,jaq
+      - name: Build matrix from target.toml
+        id: set
+        run: |
+          targets=$(toml2json .github/target.toml | jaq -c '.target')
+          echo "targets=$targets" >> "$GITHUB_OUTPUT"
+          # Split the 10 GiB GHA cache quota evenly across targets so their
+          # per-target sccache caches coexist instead of LRU-evicting each other.
+          count=$(echo "$targets" | jaq 'length')
+          size=$(( 10240 / count ))
+          echo "sccache_size=${size}M" >> "$GITHUB_OUTPUT"
+          echo "targets: $count -> sccache size per target: ${size}M"
+          echo "$targets" | jaq .
+
+  build:
+    name: ${{ matrix.name }}
+    needs: prepare
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        arch: [amd64, arm64, "386", arm, loong64, mipsle, mips64le, riscv64]
+        include: ${{ fromJSON(needs.prepare.outputs.targets) }}
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: 'recursive'
+
       - uses: taiki-e/install-action@v2
         with:
           tool: just
+
       - uses: dtolnay/rust-toolchain@nightly
-      - name: Get naiveproxy commit
-        id: naive
-        run: echo "commit=$(git -C naiveproxy rev-parse HEAD)" >> $GITHUB_OUTPUT
-      - name: Get Chromium version
-        id: chromium
-        run: echo "version=$(cat naiveproxy/CHROMIUM_VERSION)" >> $GITHUB_OUTPUT
+
+      - name: Install zstd (musl)
+        if: runner.os == 'Linux' && matrix.libc == 'musl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zstd
+
+      # Only Linux glibc targets pull a Debian sysroot that needs the keyring.
       - name: Regenerate Debian keyring
+        if: startsWith(matrix.target, 'linux/') && matrix.libc != 'musl'
         run: |
           rm -f ./naiveproxy/src/build/linux/sysroot_scripts/keyring.gpg
           GPG_TTY=/dev/null ./naiveproxy/src/build/linux/sysroot_scripts/generate_keyring.sh
-      - name: Cache build artifacts
-        id: build-cache
-        uses: actions/cache@v4
-        with:
-          path: naiveproxy/src/out
-          key: naive-build-${{ steps.naive.outputs.commit }}-${{ hashFiles('scripts/build-cronet.rs') }}-linux-${{ matrix.arch }}
-      - name: Cache ccache files
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ccache
-          key: ccache-linux-${{ matrix.arch }}-${{ steps.chromium.outputs.version }}
-          restore-keys: ccache-linux-${{ matrix.arch }}-
-      - name: Install packages
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        run: |
-          sudo apt update
-          sudo apt install -y ninja-build ccache
-      - name: Reset ccache stats
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        run: ccache -z
-      - name: Build
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        run: just compile linux/${{ matrix.arch }}
-      - name: Show ccache stats
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        run: ccache -s
-      - name: Package
-        run: just package linux/${{ matrix.arch }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: cronet-linux-${{ matrix.arch }}
-          path: |
-            lib/
-            include/
 
-  darwin:
-    runs-on: macos-15
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: darwin/amd64
-            name: darwin-amd64
-          - target: darwin/arm64
-            name: darwin-arm64
-          # iOS
-          - target: ios/arm64
-            name: ios-arm64
-          - target: ios/arm64/simulator
-            name: ios-arm64-simulator
-          - target: ios/amd64
-            name: ios-amd64-simulator
-          # tvOS
-          - target: tvos/arm64
-            name: tvos-arm64
-          - target: tvos/arm64/simulator
-            name: tvos-arm64-simulator
-          - target: tvos/amd64
-            name: tvos-amd64-simulator
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just
-      - uses: dtolnay/rust-toolchain@nightly
-      - name: Get naiveproxy commit
-        id: naive
-        run: echo "commit=$(git -C naiveproxy rev-parse HEAD)" >> $GITHUB_OUTPUT
-      - name: Get Chromium version
-        id: chromium
-        run: echo "version=$(cat naiveproxy/CHROMIUM_VERSION)" >> $GITHUB_OUTPUT
-      - name: Cache build artifacts
-        id: build-cache
-        uses: actions/cache@v4
-        with:
-          path: naiveproxy/src/out
-          key: naive-build-${{ steps.naive.outputs.commit }}-${{ hashFiles('scripts/build-cronet.rs') }}-${{ matrix.name }}
-      - name: Cache ccache files
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        uses: actions/cache@v4
-        with:
-          path: ~/Library/Caches/ccache
-          key: ccache-darwin-${{ matrix.name }}-${{ steps.chromium.outputs.version }}
-          restore-keys: ccache-darwin-${{ matrix.name }}-
-      - name: Install tools
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        run: brew install ninja ccache
-      - name: Reset ccache stats
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        run: ccache -z
-      - name: Build
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        run: just compile ${{ matrix.target }}
-      - name: Show ccache stats
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        run: ccache -s
-      - name: Package
-        run: just package ${{ matrix.target }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: cronet-${{ matrix.name }}
-          path: |
-            lib/
-            include/
-
-  windows:
-    runs-on: windows-2022
-    env:
-      SCCACHE_ARM64_VERSION: 0.12.0
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [amd64, arm64]
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just
-      - uses: dtolnay/rust-toolchain@nightly
-      - name: Get naiveproxy commit
-        id: naive
-        shell: bash
-        run: echo "commit=$(git -C naiveproxy rev-parse HEAD)" >> $GITHUB_OUTPUT
-      - name: Get Chromium version
-        id: chromium
-        shell: bash
-        run: echo "version=$(cat naiveproxy/CHROMIUM_VERSION)" >> $GITHUB_OUTPUT
-      - name: Cache build artifacts
-        id: build-cache
-        uses: actions/cache@v4
-        with:
-          path: naiveproxy/src/out
-          key: naive-build-${{ steps.naive.outputs.commit }}-${{ hashFiles('scripts/build-cronet.rs') }}-windows-${{ matrix.arch }}
-      - name: Install tools
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        run: |
-          choco install ninja -y
       - name: Install sccache
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          if ("${{ matrix.arch }}" -eq "arm64") {
-            choco install sccache --version=${{ env.SCCACHE_ARM64_VERSION }} -y
-          } else {
-            choco install sccache -y
-          }
-      - name: Get sccache version
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        id: sccache
-        shell: pwsh
-        run: |
-          $rawVersion = sccache --version
-          if ($LASTEXITCODE -ne 0) {
-            throw "failed to get sccache version"
-          }
-          $version = ($rawVersion | Select-Object -First 1) -replace '^sccache\s+', ''
-          if ([string]::IsNullOrWhiteSpace($version)) {
-            throw "invalid sccache version output: $rawVersion"
-          }
-          "version=$version" >> $env:GITHUB_OUTPUT
-      - name: Cache sccache files
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        uses: actions/cache@v4
+        uses: mozilla-actions/sccache-action@v0.0.10
         with:
-          path: ~/AppData/Local/Mozilla/sccache
-          key: sccache-windows-${{ matrix.arch }}-${{ steps.sccache.outputs.version }}-${{ steps.chromium.outputs.version }}
-          restore-keys: sccache-windows-${{ matrix.arch }}-${{ steps.sccache.outputs.version }}-
-      - name: Reset sccache stats
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        run: sccache -z
-      - name: Build
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        run: just compile windows/${{ matrix.arch }}
-      - name: Show sccache stats
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        run: sccache -s
-      - name: Package
-        run: just package windows/${{ matrix.arch }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: cronet-windows-${{ matrix.arch }}
-          path: |
-            lib/
-            include/
+          # Empty -> action fetches the latest release. Only win/arm64 pins a
+          # version (see target.toml), since latest sccache breaks its asm build.
+          version: ${{ matrix.sccache_version }}
 
-  android:
-    runs-on: ubuntu-22.04
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [arm64, amd64, arm, "386"]
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just
-      - uses: dtolnay/rust-toolchain@nightly
-      - name: Get naiveproxy commit
-        id: naive
-        run: echo "commit=$(git -C naiveproxy rev-parse HEAD)" >> $GITHUB_OUTPUT
-      - name: Get Chromium version
-        id: chromium
-        run: echo "version=$(cat naiveproxy/CHROMIUM_VERSION)" >> $GITHUB_OUTPUT
-      - name: Cache build artifacts
-        id: build-cache
-        uses: actions/cache@v4
-        with:
-          path: naiveproxy/src/out
-          key: naive-build-${{ steps.naive.outputs.commit }}-${{ hashFiles('scripts/build-cronet.rs') }}-android-${{ matrix.arch }}
-      - name: Cache ccache files
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ccache
-          key: ccache-android-${{ matrix.arch }}-${{ steps.chromium.outputs.version }}
-          restore-keys: ccache-android-${{ matrix.arch }}-
-      - name: Install packages
-        if: steps.build-cache.outputs.cache-hit != 'true'
+      # Local-disk mode: sccache writes one cache dir, persisted as a single
+      # actions/cache blob per target (the ghac backend's per-object writes get
+      # throttled by GitHub's cache service on a build this large).
+      - name: Configure sccache (local disk)
         run: |
-          sudo apt update
-          sudo apt install -y ninja-build ccache
-      - name: Reset ccache stats
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        run: ccache -z
-      - name: Build
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        run: just compile android/${{ matrix.arch }}
-      - name: Show ccache stats
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        run: ccache -s
-      - name: Package
-        run: just package android/${{ matrix.arch }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: cronet-android-${{ matrix.arch }}
-          path: |
-            lib/
-            include/
+          echo "SCCACHE_DIR=${{ runner.temp }}/sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_CACHE_SIZE=${{ needs.prepare.outputs.sccache_size }}" >> "$GITHUB_ENV"
 
-  linux-musl:
-    runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [amd64, arm64, "386", arm, loong64, mipsle, riscv64]
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just
-      - uses: dtolnay/rust-toolchain@nightly
-      - name: Get naiveproxy commit
-        id: naive
-        run: echo "commit=$(git -C naiveproxy rev-parse HEAD)" >> $GITHUB_OUTPUT
-      - name: Get Chromium version
-        id: chromium
-        run: echo "version=$(cat naiveproxy/CHROMIUM_VERSION)" >> $GITHUB_OUTPUT
-      - name: Cache build artifacts
-        id: build-cache
+      - name: Cache sccache directory
         uses: actions/cache@v4
         with:
-          path: naiveproxy/src/out
-          key: naive-build-${{ steps.naive.outputs.commit }}-${{ hashFiles('scripts/build-cronet.rs') }}-linux-musl-${{ matrix.arch }}
-      - name: Cache ccache files
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ccache
-          key: ccache-linux-musl-${{ matrix.arch }}-${{ steps.chromium.outputs.version }}
-          restore-keys: ccache-linux-musl-${{ matrix.arch }}-
-      - name: Install packages
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        run: |
-          sudo apt update
-          sudo apt install -y ninja-build zstd ccache
-      - name: Reset ccache stats
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        run: ccache -z
+          path: ${{ runner.temp }}/sccache
+          key: sccache-${{ matrix.name }}-${{ hashFiles('scripts/build-cronet.rs') }}-${{ github.run_id }}
+          restore-keys: |
+            sccache-${{ matrix.name }}-${{ hashFiles('scripts/build-cronet.rs') }}-
+            sccache-${{ matrix.name }}-
+
       - name: Build
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        run: just compile linux/${{ matrix.arch }} musl
-      - name: Show ccache stats
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        run: ccache -s
+        run: |
+          sccache -z
+          just compile "${{ matrix.target }}" "${{ matrix.libc }}"
+          sccache -s
+
       - name: Package
-        run: just package linux/${{ matrix.arch }} musl
+        run: just package "${{ matrix.target }}" "${{ matrix.libc }}"
+
       - uses: actions/upload-artifact@v4
         with:
-          name: cronet-linux-musl-${{ matrix.arch }}
+          name: ${{ matrix.name }}
           path: |
             lib/
             include/
 
   release-libs:
     if: (github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'workflow_dispatch'
-    needs: [linux, linux-musl, darwin, windows, android]
+    needs: [build]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -360,10 +131,6 @@ jobs:
           pattern: cronet-*
           path: artifacts/
           merge-multiple: false
-
-      - name: Get Chromium version
-        id: chromium
-        run: echo "version=$(cat naiveproxy/CHROMIUM_VERSION)" >> "$GITHUB_OUTPUT"
 
       - name: Prepare release assets
         run: |

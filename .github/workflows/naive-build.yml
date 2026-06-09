@@ -30,6 +30,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just
+      - uses: dtolnay/rust-toolchain@nightly
       - name: Get naiveproxy commit
         id: naive
         run: echo "commit=$(git -C naiveproxy rev-parse HEAD)" >> $GITHUB_OUTPUT
@@ -45,7 +46,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: naiveproxy/src/out
-          key: naive-build-${{ steps.naive.outputs.commit }}-${{ hashFiles('scripts/build-naive.sh') }}-linux-${{ matrix.arch }}
+          key: naive-build-${{ steps.naive.outputs.commit }}-${{ hashFiles('scripts/build-naive.rs') }}-linux-${{ matrix.arch }}
       - name: Cache ccache files
         if: steps.build-cache.outputs.cache-hit != 'true'
         uses: actions/cache@v4
@@ -107,6 +108,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just
+      - uses: dtolnay/rust-toolchain@nightly
       - name: Get naiveproxy commit
         id: naive
         run: echo "commit=$(git -C naiveproxy rev-parse HEAD)" >> $GITHUB_OUTPUT
@@ -118,7 +120,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: naiveproxy/src/out
-          key: naive-build-${{ steps.naive.outputs.commit }}-${{ hashFiles('scripts/build-naive.sh') }}-${{ matrix.name }}
+          key: naive-build-${{ steps.naive.outputs.commit }}-${{ hashFiles('scripts/build-naive.rs') }}-${{ matrix.name }}
       - name: Cache ccache files
         if: steps.build-cache.outputs.cache-hit != 'true'
         uses: actions/cache@v4
@@ -162,6 +164,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just
+      - uses: dtolnay/rust-toolchain@nightly
       - name: Get naiveproxy commit
         id: naive
         shell: bash
@@ -175,7 +178,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: naiveproxy/src/out
-          key: naive-build-${{ steps.naive.outputs.commit }}-${{ hashFiles('scripts/build-naive.sh') }}-windows-${{ matrix.arch }}
+          key: naive-build-${{ steps.naive.outputs.commit }}-${{ hashFiles('scripts/build-naive.rs') }}-windows-${{ matrix.arch }}
       - name: Install tools
         if: steps.build-cache.outputs.cache-hit != 'true'
         run: |
@@ -215,13 +218,11 @@ jobs:
         run: sccache -z
       - name: Build
         if: steps.build-cache.outputs.cache-hit != 'true'
-        shell: bash
         run: just compile windows/${{ matrix.arch }}
       - name: Show sccache stats
         if: steps.build-cache.outputs.cache-hit != 'true'
         run: sccache -s
       - name: Package
-        shell: bash
         run: just package windows/${{ matrix.arch }}
       - uses: actions/upload-artifact@v4
         with:
@@ -243,6 +244,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just
+      - uses: dtolnay/rust-toolchain@nightly
       - name: Get naiveproxy commit
         id: naive
         run: echo "commit=$(git -C naiveproxy rev-parse HEAD)" >> $GITHUB_OUTPUT
@@ -254,7 +256,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: naiveproxy/src/out
-          key: naive-build-${{ steps.naive.outputs.commit }}-${{ hashFiles('scripts/build-naive.sh') }}-android-${{ matrix.arch }}
+          key: naive-build-${{ steps.naive.outputs.commit }}-${{ hashFiles('scripts/build-naive.rs') }}-android-${{ matrix.arch }}
       - name: Cache ccache files
         if: steps.build-cache.outputs.cache-hit != 'true'
         uses: actions/cache@v4
@@ -298,6 +300,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just
+      - uses: dtolnay/rust-toolchain@nightly
       - name: Get naiveproxy commit
         id: naive
         run: echo "commit=$(git -C naiveproxy rev-parse HEAD)" >> $GITHUB_OUTPUT
@@ -309,7 +312,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: naiveproxy/src/out
-          key: naive-build-${{ steps.naive.outputs.commit }}-${{ hashFiles('scripts/build-naive.sh') }}-linux-musl-${{ matrix.arch }}
+          key: naive-build-${{ steps.naive.outputs.commit }}-${{ hashFiles('scripts/build-naive.rs') }}-linux-musl-${{ matrix.arch }}
       - name: Cache ccache files
         if: steps.build-cache.outputs.cache-hit != 'true'
         uses: actions/cache@v4

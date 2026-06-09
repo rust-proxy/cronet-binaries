@@ -36,10 +36,14 @@ link the static library (`lib/<target>/link_flags.txt`).
 ## How it works
 
 The build is orchestrated by [`just`](https://github.com/casey/just), whose
-recipes drive the bash script [`scripts/build-naive.sh`](scripts/build-naive.sh)
-(`get-clang.sh` → `gn gen` → `ninja`). **No Go (or any other) toolchain is
-required** — only `bash`, `just`, and the usual Chromium build deps
-(`gn`/`ninja`, a C/C++ toolchain).
+recipes run the single-file cargo script
+[`scripts/build-naive.rs`](scripts/build-naive.rs) (`get-clang.sh` → `gn gen` →
+`ninja`). The script depends only on the Rust standard library, so it compiles
+with no network access.
+
+**Requirements:** `just`, a Rust toolchain with `cargo -Zscript` support
+(nightly), and the usual Chromium build deps (`gn`/`ninja`, a C/C++ toolchain).
+No Go.
 
 `just` recipes:
 
@@ -53,7 +57,7 @@ required** — only `bash`, `just`, and the usual Chromium build deps
 | `just env [target] [libc]`      | Print `CC`/`CXX`/`CGO_LDFLAGS` for cross-compiling consumers    |
 
 The script can also be invoked directly without `just`:
-`bash scripts/build-naive.sh build --target linux/amd64`.
+`cargo +nightly -Zscript scripts/build-naive.rs -- build --target linux/amd64`.
 
 ## Build instructions
 

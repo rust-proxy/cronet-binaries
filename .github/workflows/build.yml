@@ -81,8 +81,9 @@ jobs:
       - name: Install sccache
         uses: mozilla-actions/sccache-action@v0.0.10
         with:
-          # Only win/arm64 pins a version (see target.toml); others use latest.
-          version: ${{ matrix.sccache_version || 'latest' }}
+          # Empty -> action fetches the latest release. Only win/arm64 pins a
+          # version (see target.toml), since latest sccache breaks its asm build.
+          version: ${{ matrix.sccache_version }}
 
       # Local-disk mode: sccache writes one cache dir, persisted as a single
       # actions/cache blob per target (the ghac backend's per-object writes get

@@ -298,6 +298,37 @@ fn run(dir: &Path, program: &str, args: &[&str], envs: &[(&str, &str)]) {
     }
 }
 
+/// Locate a real bash to run get-clang.sh. On Windows a bare `bash` resolves to
+/// C:\Windows\System32\bash.exe (WSL), which has no distro on CI runners, so we
+/// must use Git's bash explicitly.
+fn bash_program() -> String {
+    if cfg!(windows) {
+        let candidates = [
+            r"C:\Program Files\Git\bin\bash.exe",
+            r"C:\Program Files\Git\usr\bin\bash.exe",
+            r"C:\Program Files (x86)\Git\bin\bash.exe",
+        ];
+        for c in candidates {
+            if Path::new(c).is_file() {
+                return c.to_string();
+            }
+        }
+        if let Some(path) = env::var_os("PATH") {
+            for dir in env::split_paths(&path) {
+                let lower = dir.to_string_lossy().to_lowercase();
+                if lower.contains(r"\windows\system32") || lower.contains(r"\windows\sysnative") {
+                    continue; // skip WSL's bash
+                }
+                let cand = dir.join("bash.exe");
+                if cand.is_file() {
+                    return cand.to_string_lossy().to_string();
+                }
+            }
+        }
+    }
+    "bash".to_string()
+}
+
 fn find_in_path(name: &str) -> Option<PathBuf> {
     let exts: &[&str] = if cfg!(windows) { &["", ".exe", ".bat", ".cmd"] } else { &[""] };
     let path = env::var_os("PATH")?;
@@ -317,11 +348,13 @@ fn find_in_path(name: &str) -> Option<PathBuf> {
 // ---------------------------------------------------------------------------
 
 fn run_get_clang(src: &Path, t: &Target) {
+    let bash = bash_program();
+
     if host_goos() == "linux" && (t.os == "linux" || t.os == "android" || t.os == "openwrt") {
         let hcpu = arch_to_cpu(host_goarch());
         let host_flags = format!("target_os=\"linux\" target_cpu=\"{hcpu}\"");
         log(&format!("get-clang.sh (host sysroot) EXTRA_FLAGS={host_flags}"));
-        run(src, "bash", &["./get-clang.sh"], &[("EXTRA_FLAGS", &host_flags)]);
+        run(src, &bash, &["./get-clang.sh"], &[("EXTRA_FLAGS", &host_flags)]);
 
         let host_src = glibc_sysroot_path(src, &hcpu);
         let host_dst = src.join("build/linux/debian_bullseye_amd64-sysroot");
@@ -339,10 +372,10 @@ fn run_get_clang(src: &Path, t: &Target) {
             ow.target, ow.subtarget, ow.arch, ow.release, ow.gcc
         );
         log(&format!("get-clang.sh EXTRA_FLAGS={extra} OPENWRT_FLAGS={owf}"));
-        run(src, "bash", &["./get-clang.sh"], &[("EXTRA_FLAGS", &extra), ("OPENWRT_FLAGS", &owf)]);
+        run(src, &bash, &["./get-clang.sh"], &[("EXTRA_FLAGS", &extra), ("OPENWRT_FLAGS", &owf)]);
     } else {
         log(&format!("get-clang.sh EXTRA_FLAGS={extra}"));
-        run(src, "bash", &["./get-clang.sh"], &[("EXTRA_FLAGS", &extra)]);
+        run(src, &bash, &["./get-clang.sh"], &[("EXTRA_FLAGS", &extra)]);
     }
 }
 

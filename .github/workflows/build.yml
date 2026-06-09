@@ -156,7 +156,10 @@ jobs:
   windows:
     runs-on: windows-2022
     env:
-      SCCACHE_ARM64_VERSION: 0.12.0
+      # sccache stores its cache in the GitHub Actions cache service.
+      SCCACHE_GHA_ENABLED: "true"
+      # Pinned: 0.12.0 is the version validated for the windows/arm64 build.
+      SCCACHE_VERSION: "v0.12.0"
     strategy:
       fail-fast: false
       matrix:
@@ -183,49 +186,20 @@ jobs:
         with:
           path: naiveproxy/src/out
           key: naive-build-${{ steps.naive.outputs.commit }}-${{ hashFiles('scripts/build-cronet.rs') }}-windows-${{ matrix.arch }}
-      - name: Install tools
+      - name: Install ninja
         if: steps.build-cache.outputs.cache-hit != 'true'
-        run: |
-          choco install ninja -y
-      - name: Install sccache
+        run: choco install ninja -y
+      - name: Setup sccache
         if: steps.build-cache.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          if ("${{ matrix.arch }}" -eq "arm64") {
-            choco install sccache --version=${{ env.SCCACHE_ARM64_VERSION }} -y
-          } else {
-            choco install sccache -y
-          }
-      - name: Get sccache version
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        id: sccache
-        shell: pwsh
-        run: |
-          $rawVersion = sccache --version
-          if ($LASTEXITCODE -ne 0) {
-            throw "failed to get sccache version"
-          }
-          $version = ($rawVersion | Select-Object -First 1) -replace '^sccache\s+', ''
-          if ([string]::IsNullOrWhiteSpace($version)) {
-            throw "invalid sccache version output: $rawVersion"
-          }
-          "version=$version" >> $env:GITHUB_OUTPUT
-      - name: Cache sccache files
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        uses: actions/cache@v4
+        uses: mozilla-actions/sccache-action@v0.0.10
         with:
-          path: ~/AppData/Local/Mozilla/sccache
-          key: sccache-windows-${{ matrix.arch }}-${{ steps.sccache.outputs.version }}-${{ steps.chromium.outputs.version }}
-          restore-keys: sccache-windows-${{ matrix.arch }}-${{ steps.sccache.outputs.version }}-
-      - name: Reset sccache stats
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        run: sccache -z
+          version: ${{ env.SCCACHE_VERSION }}
       - name: Build
         if: steps.build-cache.outputs.cache-hit != 'true'
-        run: just compile windows/${{ matrix.arch }}
-      - name: Show sccache stats
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        run: sccache -s
+        run: |
+          sccache -z
+          just compile windows/${{ matrix.arch }}
+          sccache -s
       - name: Package
         run: just package windows/${{ matrix.arch }}
       - uses: actions/upload-artifact@v4

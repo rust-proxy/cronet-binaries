@@ -27,6 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       targets: ${{ steps.set.outputs.targets }}
+      sccache_size: ${{ steps.set.outputs.sccache_size }}
     steps:
       - uses: actions/checkout@v4
       - uses: taiki-e/install-action@v2
@@ -37,6 +38,12 @@ jobs:
         run: |
           targets=$(toml2json .github/target.toml | jaq -c '.target')
           echo "targets=$targets" >> "$GITHUB_OUTPUT"
+          # Split the 10 GiB GHA cache quota evenly across targets so their
+          # per-target sccache caches coexist instead of LRU-evicting each other.
+          count=$(echo "$targets" | jaq 'length')
+          size=$(( 10240 / count ))
+          echo "sccache_size=${size}M" >> "$GITHUB_OUTPUT"
+          echo "targets: $count -> sccache size per target: ${size}M"
           echo "$targets" | jaq .
 
   build:
@@ -80,7 +87,7 @@ jobs:
       - name: Configure sccache (local disk)
         run: |
           echo "SCCACHE_DIR=${{ runner.temp }}/sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_CACHE_SIZE=2G" >> "$GITHUB_ENV"
+          echo "SCCACHE_CACHE_SIZE=${{ needs.prepare.outputs.sccache_size }}" >> "$GITHUB_ENV"
 
       - name: Cache sccache directory
         uses: actions/cache@v4

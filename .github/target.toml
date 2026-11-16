@@ -136,10 +136,8 @@ os = "macos-15"
 target = "ios/arm64/simulator"
 name = "cronet-ios-arm64-simulator"
 
-[[target]]
-os = "macos-15"
-target = "ios/amd64"
-name = "cronet-ios-amd64-simulator"
+# Temporarily omit the iOS x64 simulator while hosted macOS runner capacity
+# prevents this job from starting. Keep the platform implementation for restoration.
 
 [[target]]
 os = "macos-15"

@@ -575,6 +575,10 @@ fn parse_frameworks(input: &str) -> Vec<String> {
 fn extract_link_flags(src: &Path, outdir: &str) -> Option<LinkFlags> {
     let ninja = src.join(outdir).join("obj/components/cronet/cronet_sample.ninja");
     let content = fs::read_to_string(&ninja).ok()?;
+    Some(parse_link_flags(&content))
+}
+
+fn parse_link_flags(content: &str) -> LinkFlags {
     let mut lf = LinkFlags { libs: vec![], frameworks: vec![], ldflags: vec![] };
     for line in content.lines() {
         if let Some(rest) = ninja_kv(line, "libs") {
@@ -586,14 +590,41 @@ fn extract_link_flags(src: &Path, outdir: &str) -> Option<LinkFlags> {
         } else if let Some(rest) = ninja_kv(line, "frameworks") {
             lf.frameworks = parse_frameworks(rest);
         } else if let Some(rest) = ninja_kv(line, "ldflags") {
-            lf.ldflags = rest
-                .split_whitespace()
-                .filter(|tok| tok.starts_with("-Wl,-wrap,"))
-                .map(String::from)
-                .collect();
+            for tok in rest.split_whitespace() {
+                if let Some(lib) = tok.strip_prefix("/DEFAULTLIB:") {
+                    // GN puts libc++'s MSVC exception support here, not in libs.
+                    lf.libs.push(lib.to_string());
+                } else if tok.starts_with("-Wl,-wrap,") {
+                    lf.ldflags.push(tok.to_string());
+                }
+            }
         }
     }
-    Some(lf)
+    lf
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preserves_msvc_default_libraries_in_either_order() {
+        for input in [
+            "ldflags = /NOLOGO /DEFAULTLIB:libcpmt.lib\nlibs = kernel32.lib ws2_32.lib",
+            "libs = kernel32.lib ws2_32.lib\nldflags = /NOLOGO /DEFAULTLIB:libcpmt.lib",
+        ] {
+            let mut libs = parse_link_flags(input).libs;
+            libs.sort();
+            assert_eq!(libs, ["kernel32.lib", "libcpmt.lib", "ws2_32.lib"]);
+        }
+    }
+
+    #[test]
+    fn preserves_unix_dependencies_without_build_only_flags() {
+        let flags = parse_link_flags("libs = -ldl -lpthread exports.lds\nldflags = -Wl,-wrap,memcpy -Wl,--gc-sections");
+        assert_eq!(flags.libs, ["-ldl", "-lpthread"]);
+        assert_eq!(flags.ldflags, ["-Wl,-wrap,memcpy"]);
+    }
 }
 
 fn write_link_flags(src: &Path, t: &Target, td: &Path, outdir: &str) {

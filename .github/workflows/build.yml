@@ -33,6 +33,12 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: toml2json,jaq
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test link flag extraction
+        run: |
+          tail -n +7 scripts/build-cronet.rs > "$RUNNER_TEMP/build-cronet-tests.rs"
+          rustc --edition 2021 --test "$RUNNER_TEMP/build-cronet-tests.rs" -o "$RUNNER_TEMP/build-cronet-tests"
+          "$RUNNER_TEMP/build-cronet-tests"
       - name: Build matrix from target.toml
         id: set
         run: |
@@ -110,6 +116,27 @@ jobs:
 
       - name: Package
         run: just package "${{ matrix.target }}" "${{ matrix.libc }}"
+
+      # Link the Rust bindings too: cronet_sample alone does not exercise all
+      # exported wrappers or libc++'s MSVC exception support.
+      - name: Check Rust static consumer
+        if: matrix.name == 'cronet-linux-amd64' || matrix.name == 'cronet-windows-amd64'
+        env:
+          CRONET_RS_REV: 27f42e449bf32f5c45fbce2e8365e9a6c7992470
+        run: |
+          git clone https://github.com/rust-proxy/cronet-rs "$RUNNER_TEMP/cronet-rs"
+          git -C "$RUNNER_TEMP/cronet-rs" checkout "$CRONET_RS_REV"
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            export CRONET_LIB_DIR="$(cygpath -w "$PWD/lib/windows_amd64")"
+            export RUSTFLAGS="-C target-feature=+crt-static"
+            target=x86_64-pc-windows-msvc
+          else
+            export CRONET_LIB_DIR="$PWD/lib/linux_amd64"
+            target=x86_64-unknown-linux-gnu
+          fi
+          cd "$RUNNER_TEMP/cronet-rs"
+          cargo build --workspace --locked --target "$target" --features static-link
+          cargo test --workspace --locked --target "$target" --features static-link --lib
 
       - uses: actions/upload-artifact@v4
         with:

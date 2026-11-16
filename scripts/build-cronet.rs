@@ -488,6 +488,7 @@ fn build_gn_args(src: &Path, t: &Target) -> Vec<String> {
 
 fn compile_target(src: &Path, t: &Target) {
     run_get_clang(src, t);
+    boringssl::ensure_tools(src).unwrap_or_else(|e| die(&format!("BoringSSL tool setup failed: {e}")));
     boringssl::patch_gn(src).unwrap_or_else(|e| die(&format!("BoringSSL GN integration failed: {e}")));
 
     let outdir = output_dir(t);

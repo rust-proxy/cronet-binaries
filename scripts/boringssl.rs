@@ -10,6 +10,30 @@ use std::process::Command;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
+fn nm_path(src: &Path) -> PathBuf {
+    src.join("third_party/llvm-build/Release+Asserts/bin")
+        .join(if cfg!(windows) {
+            "llvm-nm.exe"
+        } else {
+            "llvm-nm"
+        })
+}
+
+pub fn ensure_tools(src: &Path) -> Result<()> {
+    if !nm_path(src).is_file() {
+        // Chromium ships llvm-nm in the supplementary objdump package on
+        // macOS and Windows. update.py selects the same pinned LLVM revision.
+        let status = Command::new(if cfg!(windows) { "python" } else { "python3" })
+            .current_dir(src)
+            .args(["tools/clang/scripts/update.py", "--package=objdump"])
+            .status()?;
+        if !status.success() || !nm_path(src).is_file() {
+            return Err("failed to install Chromium's pinned llvm-nm".into());
+        }
+    }
+    Ok(())
+}
+
 fn write_changed(path: &Path, contents: &str) -> Result<()> {
     if fs::read(path).ok().as_deref() != Some(contents.as_bytes()) {
         fs::write(path, contents)?;
@@ -71,14 +95,7 @@ pub fn patch_gn(src: &Path) -> Result<()> {
 }
 
 fn llvm_nm(src: &Path, objects: &[PathBuf]) -> Result<String> {
-    let executable = if cfg!(windows) {
-        "llvm-nm.exe"
-    } else {
-        "llvm-nm"
-    };
-    let tool = src
-        .join("third_party/llvm-build/Release+Asserts/bin")
-        .join(executable);
+    let tool = nm_path(src);
     let result = Command::new(tool)
         .args(["--defined-only", "--extern-only", "--format=posix"])
         .args(objects)

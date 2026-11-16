@@ -38,6 +38,7 @@ jobs:
         run: |
           tail -n +7 scripts/build-cronet.rs > "$RUNNER_TEMP/build-cronet-tests.rs"
           cp scripts/boringssl.rs "$RUNNER_TEMP/boringssl.rs"
+          cp scripts/windows_crt.rs "$RUNNER_TEMP/windows_crt.rs"
           rustc --edition 2021 --test "$RUNNER_TEMP/build-cronet-tests.rs" -o "$RUNNER_TEMP/build-cronet-tests"
           "$RUNNER_TEMP/build-cronet-tests"
       - name: Build matrix from target.toml
@@ -140,7 +141,7 @@ jobs:
       # Link the Rust bindings too: cronet_sample alone does not exercise all
       # exported wrappers or libc++'s MSVC exception support.
       - name: Check Rust static consumer
-        if: matrix.name == 'cronet-linux-amd64' || matrix.name == 'cronet-windows-amd64'
+        if: matrix.name == 'cronet-linux-amd64' || startsWith(matrix.name, 'cronet-windows-amd64')
         env:
           CRONET_RS_REV: 27f42e449bf32f5c45fbce2e8365e9a6c7992470
         run: |
@@ -150,10 +151,18 @@ jobs:
           if [[ "$RUNNER_OS" == Windows ]]; then
             # Reuse the NASM executable Chromium already built. The runner's
             # base image does not put an assembler on PATH for boring-sys.
-            test -f "$PWD/naiveproxy/src/out/cronet-win-x64/nasm.exe"
-            export PATH="$PWD/naiveproxy/src/out/cronet-win-x64:$PATH"
-            export CRONET_LIB_DIR="$(cygpath -w "$PWD/lib/windows_amd64")"
-            export RUSTFLAGS="-C target-feature=+crt-static"
+            variant=""
+            lib_variant=""
+            if [[ "${{ matrix.target }}" == */md ]]; then
+              variant="-md"
+              lib_variant="_md"
+              unset RUSTFLAGS
+            else
+              export RUSTFLAGS="-C target-feature=+crt-static"
+            fi
+            test -f "$PWD/naiveproxy/src/out/cronet-win-x64${variant}/nasm.exe"
+            export PATH="$PWD/naiveproxy/src/out/cronet-win-x64${variant}:$PATH"
+            export CRONET_LIB_DIR="$(cygpath -w "$PWD/lib/windows_amd64${lib_variant}")"
             target=x86_64-pc-windows-msvc
           else
             export CRONET_LIB_DIR="$PWD/lib/linux_amd64"

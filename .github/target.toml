@@ -167,3 +167,15 @@ name = "cronet-windows-arm64"
 # sccache >=0.13 mishandles BoringSSL's assembler output paths on win/arm64;
 # pin the last known-good version (others use latest).
 sccache_version = "v0.12.0"
+
+# Static Cronet with Rust's default dynamic MSVC CRT (/MD).
+[[target]]
+os = "windows-2022"
+target = "windows/amd64/md"
+name = "cronet-windows-amd64-md"
+
+[[target]]
+os = "windows-2022"
+target = "windows/arm64/md"
+name = "cronet-windows-arm64-md"
+sccache_version = "v0.12.0"

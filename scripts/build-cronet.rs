@@ -22,6 +22,7 @@ edition = "2021"
 //!        --export              (env only) prefix output with `export `
 
 mod boringssl;
+mod windows_crt;
 
 use std::env;
 use std::fs;
@@ -32,6 +33,7 @@ const ALL_SPECS: &[&str] = &[
     "linux/amd64", "linux/arm64", "linux/386", "linux/arm", "linux/loong64",
     "linux/mipsle", "linux/mips64le", "linux/riscv64",
     "darwin/amd64", "darwin/arm64", "windows/amd64", "windows/arm64",
+    "windows/amd64/md", "windows/arm64/md",
     "ios/arm64", "ios/arm64/simulator", "ios/amd64",
     "tvos/arm64", "tvos/arm64/simulator", "tvos/amd64",
     "android/arm64", "android/amd64", "android/arm", "android/386",
@@ -97,6 +99,7 @@ struct Target {
     cpu: String,         // gn target_cpu: x64, arm64, x86, arm, ...
     goos: String,        // Go GOOS
     arch: String,        // Go GOARCH
+    dynamic_crt: bool,   // Windows /MD variant; existing targets retain /MT
     libc: String,        // "" or "musl"
     platform: String,    // Apple: iphoneos | tvos
     environment: String, // Apple: device | simulator
@@ -127,6 +130,13 @@ fn resolve_target(spec: &str, libc: &str) -> Target {
     t.goos = goos.to_string();
     t.arch = goarch.to_string();
     t.cpu = arch_to_cpu(goarch);
+    if goos == "windows" {
+        t.dynamic_crt = match variant {
+            "" => false,
+            "md" => true,
+            _ => die("Windows variant must be empty (/MT) or md (/MD)"),
+        };
+    }
     t.os = match goos {
         "linux" => "linux",
         "darwin" => "mac",
@@ -190,7 +200,7 @@ fn output_dir(t: &Target) -> String {
         }
         d
     } else {
-        format!("out/cronet-{}-{}", t.os, t.cpu)
+        format!("out/cronet-{}-{}{}", t.os, t.cpu, if t.dynamic_crt { "-md" } else { "" })
     }
 }
 
@@ -202,6 +212,9 @@ fn lib_dir_name(t: &Target) -> String {
     }
     if t.libc == "musl" {
         n.push_str("_musl");
+    }
+    if t.dynamic_crt {
+        n.push_str("_md");
     }
     n
 }
@@ -459,7 +472,15 @@ fn build_gn_args(src: &Path, t: &Target) -> Vec<String> {
                 args.push("is_cfi=false".to_string());
             }
         }
-        "win" => args.push("use_sysroot=false".to_string()),
+        "win" => {
+            args.push("use_sysroot=false".to_string());
+            args.push(format!("cronet_dynamic_crt={}", t.dynamic_crt));
+            if t.dynamic_crt {
+                // The static CRT allocator shim overrides /MT internals. /MD
+                // consumers must use their shared CRT allocator instead.
+                args.push("use_allocator_shim=false".to_string());
+            }
+        },
         "android" => {
             args.push("use_sysroot=false".to_string());
             args.push("default_min_sdk_version=23".to_string());
@@ -491,6 +512,9 @@ fn compile_target(src: &Path, t: &Target) {
     boringssl::ensure_tools(src).unwrap_or_else(|e| die(&format!("BoringSSL tool setup failed: {e}")));
     boringssl::patch_gn(src).unwrap_or_else(|e| die(&format!("BoringSSL GN integration failed: {e}")));
 
+    if t.goos == "windows" {
+        windows_crt::patch_gn(src).unwrap_or_else(|e| die(&format!("Windows CRT integration failed: {e}")));
+    }
     let outdir = output_dir(t);
     let common_args = build_gn_args(src, t).join(" ");
     let gn_args = format!("{common_args} cronet_boringssl_prefix=true");
@@ -636,6 +660,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn windows_crt_variants_have_separate_build_and_package_paths() {
+        for arch in ["amd64", "arm64"] {
+            let mt = resolve_target(&format!("windows/{arch}"), "");
+            let md = resolve_target(&format!("windows/{arch}/md"), "");
+            assert!(!mt.dynamic_crt);
+            assert!(md.dynamic_crt);
+            assert_eq!(output_dir(&md), format!("{}-md", output_dir(&mt)));
+            assert_eq!(lib_dir_name(&md), format!("windows_{arch}_md"));
+            assert!(build_gn_args(Path::new("."), &md).contains(&"cronet_dynamic_crt=true".into()));
+            assert!(build_gn_args(Path::new("."), &mt).contains(&"cronet_dynamic_crt=false".into()));
+        }
+    }
+
+    #[test]
     fn preserves_msvc_default_libraries_in_either_order() {
         for input in [
             "ldflags = /NOLOGO /DEFAULTLIB:libcpmt.lib\nlibs = kernel32.lib ws2_32.lib",
@@ -664,6 +702,12 @@ fn write_link_flags(src: &Path, t: &Target, td: &Path, outdir: &str) {
             return;
         }
     };
+    if t.goos == "windows" {
+        let expected = if t.dynamic_crt { "msvcprt.lib" } else { "libcpmt.lib" };
+        if !lf.libs.iter().any(|lib| lib == expected) {
+            die(&format!("Windows CRT metadata is missing {expected}"));
+        }
+    }
     let mut out = String::new();
     if !lf.ldflags.is_empty() {
         out.push_str(&format!("# ldflags\n{}\n", lf.ldflags.join(" ")));

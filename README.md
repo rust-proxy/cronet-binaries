@@ -8,6 +8,7 @@ bindings here. It produces:
 
 - `libcronet.a`  — static library (Linux glibc/musl, macOS, iOS, tvOS, Android)
 - `libcronet.so` — shared library (Linux glibc)
+- `cronet.lib`  — static library (Windows MSVC)
 - `libcronet.dll`— shared library (Windows)
 
 together with the C headers (`include/`) and the system link flags required to
@@ -117,3 +118,9 @@ cc myapp.c -Iinclude lib/linux_amd64/libcronet.a $(cat lib/linux_amd64/link_flag
 
 On Windows / for dynamic linking, ship `libcronet.dll` / `libcronet.so` next to
 your executable.
+
+Linux release archives use `libcronet-linux-<arch>.a` (glibc) and
+`libcronet-linux-<arch>_musl.a` (musl). Windows MSVC archives use
+`libcronet-windows-<arch>.lib`; these are real static archives, not DLL import
+libraries. Matching `.link-flags.txt` assets record native linker dependencies.
+Existing `.so` and `.dll` assets remain available for dynamic consumers.

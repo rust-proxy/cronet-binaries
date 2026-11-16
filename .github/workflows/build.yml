@@ -147,6 +147,13 @@ jobs:
             fi
           done
 
+          # Linux static libraries: keep glibc and musl assets distinct.
+          for dir in artifacts/cronet-linux-*/lib/linux_*; do
+            SLOT=$(basename "$dir" | sed 's/^linux_//')
+            cp "$dir/libcronet.a" "release/libcronet-linux-${SLOT}.a"
+            cp "$dir/link_flags.txt" "release/libcronet-linux-${SLOT}.link-flags.txt"
+          done
+
           # Android static libraries (.a)
           for dir in artifacts/cronet-android-*/lib/android_*; do
             ARCH=$(basename "$dir" | sed 's/android_//')
@@ -155,9 +162,11 @@ jobs:
             fi
           done
 
-          # Windows DLLs
+          # Windows DLLs and MSVC static archives
           for dir in artifacts/cronet-windows-*/lib/windows_*; do
             ARCH=$(basename "$dir" | sed 's/windows_//')
+            cp "$dir/cronet.lib" "release/libcronet-windows-${ARCH}.lib"
+            cp "$dir/link_flags.txt" "release/libcronet-windows-${ARCH}.link-flags.txt"
             if [ -f "$dir/libcronet.dll" ]; then
               cp "$dir/libcronet.dll" "release/libcronet-windows-${ARCH}.dll"
             fi

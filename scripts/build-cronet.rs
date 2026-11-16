@@ -506,16 +506,15 @@ fn compile_target(src: &Path, t: &Target) {
         run(src, &gn_str, &gen_args, &[]);
     }
 
-    if t.goos == "windows" {
+    log(&format!("ninja -C {outdir} cronet_static"));
+    run(src, "ninja", &["-C", &outdir, "cronet_static"], &[]);
+    if t.goos == "windows" || (t.goos == "linux" && t.libc != "musl") {
         log(&format!("ninja -C {outdir} cronet"));
         run(src, "ninja", &["-C", &outdir, "cronet"], &[]);
-    } else {
-        log(&format!("ninja -C {outdir} cronet_static"));
-        run(src, "ninja", &["-C", &outdir, "cronet_static"], &[]);
-        if t.goos == "linux" && t.libc != "musl" {
-            log(&format!("ninja -C {outdir} cronet"));
-            run(src, "ninja", &["-C", &outdir, "cronet"], &[]);
-        }
+    }
+    if t.goos == "windows" || t.goos == "linux" {
+        // Prove the complete archive can link, including cross-built targets.
+        run(src, "ninja", &["-C", &outdir, "cronet_sample"], &[]);
     }
 }
 
@@ -640,6 +639,9 @@ fn package_target(root: &Path, src: &Path, t: &Target) {
         } else {
             log(&format!("Warning: DLL not found for {}/{}, skipping", t.goos, t.arch));
         }
+        let archive = src.join(&outdir).join("obj/components/cronet/cronet_static.lib");
+        copy_file(&archive, &td.join("cronet.lib"));
+        write_link_flags(src, t, &td, &outdir);
         log(&format!("Packaged lib/{name}"));
         return;
     }

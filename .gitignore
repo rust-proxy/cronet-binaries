@@ -1,5 +1,7 @@
 /.idea
 /build/
+/target/
+**/target/
 /thinlto-cache/
 .DS_Store
 CLAUDE.md

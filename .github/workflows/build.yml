@@ -34,9 +34,10 @@ jobs:
         with:
           tool: toml2json,jaq
       - uses: dtolnay/rust-toolchain@stable
-      - name: Test link flag extraction
+      - name: Test native build helpers
         run: |
           tail -n +7 scripts/build-cronet.rs > "$RUNNER_TEMP/build-cronet-tests.rs"
+          cp scripts/boringssl.rs "$RUNNER_TEMP/boringssl.rs"
           rustc --edition 2021 --test "$RUNNER_TEMP/build-cronet-tests.rs" -o "$RUNNER_TEMP/build-cronet-tests"
           "$RUNNER_TEMP/build-cronet-tests"
       - name: Build matrix from target.toml
@@ -103,9 +104,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/sccache
-          key: sccache-${{ matrix.name }}-${{ hashFiles('scripts/build-cronet.rs') }}-${{ github.run_id }}
+          key: sccache-${{ matrix.name }}-${{ hashFiles('scripts/*.rs') }}-${{ github.run_id }}
           restore-keys: |
-            sccache-${{ matrix.name }}-${{ hashFiles('scripts/build-cronet.rs') }}-
+            sccache-${{ matrix.name }}-${{ hashFiles('scripts/*.rs') }}-
             sccache-${{ matrix.name }}-
 
       - name: Build
@@ -126,6 +127,7 @@ jobs:
         run: |
           git clone https://github.com/rust-proxy/cronet-rs "$RUNNER_TEMP/cronet-rs"
           git -C "$RUNNER_TEMP/cronet-rs" checkout "$CRONET_RS_REV"
+          coexist_manifest="$PWD/tests/static-coexist/Cargo.toml"
           if [[ "$RUNNER_OS" == Windows ]]; then
             export CRONET_LIB_DIR="$(cygpath -w "$PWD/lib/windows_amd64")"
             export RUSTFLAGS="-C target-feature=+crt-static"
@@ -137,6 +139,7 @@ jobs:
           cd "$RUNNER_TEMP/cronet-rs"
           cargo build --workspace --locked --target "$target" --features static-link
           cargo test --workspace --locked --target "$target" --features static-link --lib
+          cargo test --manifest-path "$coexist_manifest" --locked --target "$target"
 
       - uses: actions/upload-artifact@v4
         with:

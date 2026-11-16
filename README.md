@@ -125,11 +125,19 @@ Linux release archives use `libcronet-linux-<arch>.a` (glibc) and
 libraries. Matching `.link-flags.txt` assets record native linker dependencies.
 Existing `.so` and `.dll` assets remain available for dynamic consumers.
 
-Windows static consumers must use the static CRT (`/MT`, or Rust
-`-C target-feature=+crt-static`) and include the companion linker libraries.
-The companion includes `libcpmt.lib`, extracted from GN's `/DEFAULTLIB` flags,
-which libc++ needs for MSVC exception support. CI links and tests the Rust
-bindings on Linux x64 and Windows x64 in addition to the native sample.
+Windows provides both CRT variants of the complete static Cronet archive:
+
+- `libcronet-windows-<arch>_md.lib` uses `/MD`, matching Rust's default MSVC
+  runtime. No `+crt-static` flag is needed. Build with `just build windows/amd64/md`
+  (or `windows/arm64/md`). The companion metadata includes `msvcprt.lib`.
+- `libcronet-windows-<arch>.lib` retains `/MT` for consumers explicitly using
+  `-C target-feature=+crt-static`. Its metadata includes `libcpmt.lib`.
+
+Both variants statically link Cronet; `/MD` depends on the MSVC runtime DLLs.
+Use the matching `.link-flags.txt` file and the same CRT as the application.
+The `/MD` build disables Chromium's static-CRT allocator shim so allocations
+use the shared CRT. CI verifies both variants against the Rust bindings and
+an independent BoringSSL consumer.
 
 Cronet's private BoringSSL functions, data, opaque types and C++ namespace are
 prefixed at source level so applications can also link another BoringSSL copy

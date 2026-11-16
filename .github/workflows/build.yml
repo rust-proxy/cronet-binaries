@@ -143,7 +143,7 @@ jobs:
       - name: Check Rust static consumer
         if: matrix.name == 'cronet-linux-amd64' || startsWith(matrix.name, 'cronet-windows-amd64')
         env:
-          CRONET_RS_REV: 27f42e449bf32f5c45fbce2e8365e9a6c7992470
+          CRONET_RS_REV: 3c41616eb49120a32ecf5e2c3a18951ab47cb41f
         run: |
           git clone https://github.com/rust-proxy/cronet-rs "$RUNNER_TEMP/cronet-rs"
           git -C "$RUNNER_TEMP/cronet-rs" checkout "$CRONET_RS_REV"

@@ -6,4 +6,4 @@ publish = false
 
 [dependencies]
 boring = "=5.2.0"
-cronet-rs = { git = "https://github.com/rust-proxy/cronet-rs", rev = "27f42e449bf32f5c45fbce2e8365e9a6c7992470", default-features = false, features = ["static-link"] }
+cronet-rs = { git = "https://github.com/rust-proxy/cronet-rs", rev = "3c41616eb49120a32ecf5e2c3a18951ab47cb41f", default-features = false, features = ["static-link"] }

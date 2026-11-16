@@ -124,3 +124,16 @@ Linux release archives use `libcronet-linux-<arch>.a` (glibc) and
 `libcronet-windows-<arch>.lib`; these are real static archives, not DLL import
 libraries. Matching `.link-flags.txt` assets record native linker dependencies.
 Existing `.so` and `.dll` assets remain available for dynamic consumers.
+
+Windows static consumers must use the static CRT (`/MT`, or Rust
+`-C target-feature=+crt-static`) and include the companion linker libraries.
+The companion includes `libcpmt.lib`, extracted from GN's `/DEFAULTLIB` flags,
+which libc++ needs for MSVC exception support. CI links and tests the Rust
+bindings on Linux x64 and Windows x64 in addition to the native sample.
+
+Cronet's private BoringSSL functions, data, opaque types and C++ namespace are
+prefixed at source level so applications can also link another BoringSSL copy
+(for example Quiche or `boring`). The build first discovers target-specific
+symbols, including assembly, then rebuilds with generated prefix headers and
+audits the completed archive. Linux x64 and Windows x64 CI additionally links
+and initializes Cronet alongside the Rust `boring` crate.

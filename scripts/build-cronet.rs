@@ -21,6 +21,8 @@ edition = "2021"
 //!        --libc <glibc|musl>   musl => static OpenWrt/musl Linux build
 //!        --export              (env only) prefix output with `export `
 
+mod boringssl;
+
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -486,9 +488,12 @@ fn build_gn_args(src: &Path, t: &Target) -> Vec<String> {
 
 fn compile_target(src: &Path, t: &Target) {
     run_get_clang(src, t);
+    boringssl::ensure_tools(src).unwrap_or_else(|e| die(&format!("BoringSSL tool setup failed: {e}")));
+    boringssl::patch_gn(src).unwrap_or_else(|e| die(&format!("BoringSSL GN integration failed: {e}")));
 
     let outdir = output_dir(t);
-    let gn_args = build_gn_args(src, t).join(" ");
+    let common_args = build_gn_args(src, t).join(" ");
+    let gn_args = format!("{common_args} cronet_boringssl_prefix=true");
 
     let gn = if host_goos() == "windows" {
         src.join("gn/out/gn.exe")
@@ -496,6 +501,20 @@ fn compile_target(src: &Path, t: &Target) {
         src.join("gn/out/gn")
     };
     let gn_str = gn.to_string_lossy().to_string();
+
+    // Bootstrap only BoringSSL in a separate directory. Its target-specific
+    // exports include assembly routines and the Windows TLS callback variable.
+    let bootstrap = format!("{outdir}-bssl-symbols");
+    let bootstrap_args = format!("--args={common_args} cronet_boringssl_prefix=false");
+    let bootstrap_env = if host_goos() == "windows" {
+        vec![("DEPOT_TOOLS_WIN_TOOLCHAIN", "0")]
+    } else {
+        vec![]
+    };
+    run(src, &gn_str, &["gen", &bootstrap, &bootstrap_args], &bootstrap_env);
+    run(src, "ninja", &["-C", &bootstrap, "boringssl"], &[]);
+    boringssl::generate_headers(src, &bootstrap, &outdir, matches!(t.goos.as_str(), "darwin" | "ios" | "tvos"))
+        .unwrap_or_else(|e| die(&format!("BoringSSL prefix generation failed: {e}")));
 
     log(&format!("gn gen {outdir}"));
     let args_flag = format!("--args={gn_args}");
@@ -508,6 +527,13 @@ fn compile_target(src: &Path, t: &Target) {
 
     log(&format!("ninja -C {outdir} cronet_static"));
     run(src, "ninja", &["-C", &outdir, "cronet_static"], &[]);
+    let archive = src.join(&outdir).join(if t.goos == "windows" {
+        "obj/components/cronet/cronet_static.lib"
+    } else {
+        "obj/components/cronet/libcronet_static.a"
+    });
+    boringssl::verify_archive(src, &archive, matches!(t.goos.as_str(), "darwin" | "ios" | "tvos"))
+        .unwrap_or_else(|e| die(&format!("BoringSSL isolation verification failed: {e}")));
     if t.goos == "windows" || (t.goos == "linux" && t.libc != "musl") {
         log(&format!("ninja -C {outdir} cronet"));
         run(src, "ninja", &["-C", &outdir, "cronet"], &[]);
@@ -575,6 +601,12 @@ fn parse_frameworks(input: &str) -> Vec<String> {
 fn extract_link_flags(src: &Path, outdir: &str) -> Option<LinkFlags> {
     let ninja = src.join(outdir).join("obj/components/cronet/cronet_sample.ninja");
     let content = fs::read_to_string(&ninja).ok()?;
+    Some(parse_link_flags(&content))
+}
+
+fn parse_link_flags(content: &str) -> LinkFlags {
+    // GN escapes colons in Ninja values, including MSVC /DEFAULTLIB flags.
+    let content = content.replace("$:", ":");
     let mut lf = LinkFlags { libs: vec![], frameworks: vec![], ldflags: vec![] };
     for line in content.lines() {
         if let Some(rest) = ninja_kv(line, "libs") {
@@ -586,14 +618,42 @@ fn extract_link_flags(src: &Path, outdir: &str) -> Option<LinkFlags> {
         } else if let Some(rest) = ninja_kv(line, "frameworks") {
             lf.frameworks = parse_frameworks(rest);
         } else if let Some(rest) = ninja_kv(line, "ldflags") {
-            lf.ldflags = rest
-                .split_whitespace()
-                .filter(|tok| tok.starts_with("-Wl,-wrap,"))
-                .map(String::from)
-                .collect();
+            for tok in rest.split_whitespace() {
+                if let Some(lib) = tok.strip_prefix("/DEFAULTLIB:") {
+                    // GN puts libc++'s MSVC exception support here, not in libs.
+                    lf.libs.push(lib.to_string());
+                } else if tok.starts_with("-Wl,-wrap,") {
+                    lf.ldflags.push(tok.to_string());
+                }
+            }
         }
     }
-    Some(lf)
+    lf
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preserves_msvc_default_libraries_in_either_order() {
+        for input in [
+            "ldflags = /NOLOGO /DEFAULTLIB:libcpmt.lib\nlibs = kernel32.lib ws2_32.lib",
+            "libs = kernel32.lib ws2_32.lib\nldflags = /NOLOGO /DEFAULTLIB:libcpmt.lib",
+            "libs = kernel32.lib ws2_32.lib\nldflags = /NOLOGO /DEFAULTLIB$:libcpmt.lib",
+        ] {
+            let mut libs = parse_link_flags(input).libs;
+            libs.sort();
+            assert_eq!(libs, ["kernel32.lib", "libcpmt.lib", "ws2_32.lib"]);
+        }
+    }
+
+    #[test]
+    fn preserves_unix_dependencies_without_build_only_flags() {
+        let flags = parse_link_flags("libs = -ldl -lpthread exports.lds\nldflags = -Wl,-wrap,memcpy -Wl,--gc-sections");
+        assert_eq!(flags.libs, ["-ldl", "-lpthread"]);
+        assert_eq!(flags.ldflags, ["-Wl,-wrap,memcpy"]);
+    }
 }
 
 fn write_link_flags(src: &Path, t: &Target, td: &Path, outdir: &str) {

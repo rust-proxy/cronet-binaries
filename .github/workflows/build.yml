@@ -33,6 +33,13 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: toml2json,jaq
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test native build helpers
+        run: |
+          tail -n +7 scripts/build-cronet.rs > "$RUNNER_TEMP/build-cronet-tests.rs"
+          cp scripts/boringssl.rs "$RUNNER_TEMP/boringssl.rs"
+          rustc --edition 2021 --test "$RUNNER_TEMP/build-cronet-tests.rs" -o "$RUNNER_TEMP/build-cronet-tests"
+          "$RUNNER_TEMP/build-cronet-tests"
       - name: Build matrix from target.toml
         id: set
         run: |
@@ -94,12 +101,13 @@ jobs:
           echo "SCCACHE_CACHE_SIZE=${{ needs.prepare.outputs.sccache_size }}" >> "$GITHUB_ENV"
 
       - name: Cache sccache directory
-        uses: actions/cache@v4
+        id: native-cache
+        uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/sccache
-          key: sccache-${{ matrix.name }}-${{ hashFiles('scripts/build-cronet.rs') }}-${{ github.run_id }}
+          key: sccache-${{ matrix.name }}-${{ hashFiles('scripts/*.rs') }}-${{ github.run_id }}
           restore-keys: |
-            sccache-${{ matrix.name }}-${{ hashFiles('scripts/build-cronet.rs') }}-
+            sccache-${{ matrix.name }}-${{ hashFiles('scripts/*.rs') }}-
             sccache-${{ matrix.name }}-
 
       - name: Build
@@ -108,15 +116,53 @@ jobs:
           just compile "${{ matrix.target }}" "${{ matrix.libc }}"
           sccache -s
 
+      # Preserve the expensive native build even if a later Rust consumer
+      # check fails because of its own toolchain or dependency setup.
+      - name: Save native compiler cache
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/sccache
+          key: ${{ steps.native-cache.outputs.cache-primary-key }}
+
       - name: Package
         run: just package "${{ matrix.target }}" "${{ matrix.libc }}"
 
+      # Keep artifacts available for diagnosis; release-libs still requires
+      # every build job, including its consumer checks, to succeed.
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
           path: |
             lib/
             include/
+
+      # Link the Rust bindings too: cronet_sample alone does not exercise all
+      # exported wrappers or libc++'s MSVC exception support.
+      - name: Check Rust static consumer
+        if: matrix.name == 'cronet-linux-amd64' || matrix.name == 'cronet-windows-amd64'
+        env:
+          CRONET_RS_REV: 27f42e449bf32f5c45fbce2e8365e9a6c7992470
+        run: |
+          git clone https://github.com/rust-proxy/cronet-rs "$RUNNER_TEMP/cronet-rs"
+          git -C "$RUNNER_TEMP/cronet-rs" checkout "$CRONET_RS_REV"
+          coexist_manifest="$PWD/tests/static-coexist/Cargo.toml"
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            # Reuse the NASM executable Chromium already built. The runner's
+            # base image does not put an assembler on PATH for boring-sys.
+            test -f "$PWD/naiveproxy/src/out/cronet-win-x64/nasm.exe"
+            export PATH="$PWD/naiveproxy/src/out/cronet-win-x64:$PATH"
+            export CRONET_LIB_DIR="$(cygpath -w "$PWD/lib/windows_amd64")"
+            export RUSTFLAGS="-C target-feature=+crt-static"
+            target=x86_64-pc-windows-msvc
+          else
+            export CRONET_LIB_DIR="$PWD/lib/linux_amd64"
+            target=x86_64-unknown-linux-gnu
+          fi
+          cd "$RUNNER_TEMP/cronet-rs"
+          cargo build --workspace --locked --target "$target" --features static-link
+          cargo test --workspace --locked --target "$target" --features static-link --lib
+          cargo test --manifest-path "$coexist_manifest" --locked --target "$target"
 
   release-libs:
     if: (github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'workflow_dispatch'

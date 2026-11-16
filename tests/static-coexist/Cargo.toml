@@ -1,0 +1,9 @@
+[package]
+name = "cronet-static-coexist"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+boring = "=5.2.0"
+cronet-rs = { git = "https://github.com/rust-proxy/cronet-rs", rev = "27f42e449bf32f5c45fbce2e8365e9a6c7992470", default-features = false, features = ["static-link"] }

@@ -35,7 +35,7 @@ pub fn patch_gn(src: &Path) -> Result<()> {
             r#"config("external_config") {
   include_dirs = [ "src/include" ]
   defines = []
-  if (cronet_boringssl_prefix) {
+  if (cronet_boringssl_prefix && current_toolchain == default_toolchain) {
     include_dirs += [ "$root_gen_dir/cronet_boringssl" ]
     # Rename the outer namespace too: Chromium forward-declares bssl types.
     defines += [ "bssl=cronet_bssl" ]
@@ -58,7 +58,7 @@ pub fn patch_gn(src: &Path) -> Result<()> {
         ),
         (
             "  nasm_assemble(\"boringssl_asm\") {",
-            "  nasm_assemble(\"boringssl_asm\") {\n    if (cronet_boringssl_prefix) {\n      include_dirs = [ \"$root_gen_dir/cronet_boringssl\" ]\n      defines = [ \"BORINGSSL_PREFIX=cronet_bssl\" ]\n    }",
+            "  nasm_assemble(\"boringssl_asm\") {\n    if (cronet_boringssl_prefix && current_toolchain == default_toolchain) {\n      include_dirs = [ \"$root_gen_dir/cronet_boringssl\" ]\n      defines = [ \"BORINGSSL_PREFIX=cronet_bssl\" ]\n    }",
         ),
     ];
     for (before, after) in replacements {

@@ -108,7 +108,7 @@ dependencies = [
 [[package]]
 name = "cronet-rs"
 version = "0.1.0"
-source = "git+https://github.com/rust-proxy/cronet-rs?rev=3c41616eb49120a32ecf5e2c3a18951ab47cb41f#3c41616eb49120a32ecf5e2c3a18951ab47cb41f"
+source = "git+https://github.com/rust-proxy/cronet-rs?rev=2ca67b906c294f22ab9ab982753090e1337e3e92#2ca67b906c294f22ab9ab982753090e1337e3e92"
 dependencies = [
  "cronet-sys",
  "log",
@@ -127,7 +127,7 @@ dependencies = [
 [[package]]
 name = "cronet-sys"
 version = "0.1.0"
-source = "git+https://github.com/rust-proxy/cronet-rs?rev=3c41616eb49120a32ecf5e2c3a18951ab47cb41f#3c41616eb49120a32ecf5e2c3a18951ab47cb41f"
+source = "git+https://github.com/rust-proxy/cronet-rs?rev=2ca67b906c294f22ab9ab982753090e1337e3e92#2ca67b906c294f22ab9ab982753090e1337e3e92"
 
 [[package]]
 name = "either"

@@ -143,7 +143,7 @@ jobs:
       - name: Check Rust static consumer
         if: matrix.name == 'cronet-linux-amd64' || startsWith(matrix.name, 'cronet-windows-amd64')
         env:
-          CRONET_RS_REV: 3c41616eb49120a32ecf5e2c3a18951ab47cb41f
+          CRONET_RS_REV: 2ca67b906c294f22ab9ab982753090e1337e3e92
         run: |
           git clone https://github.com/rust-proxy/cronet-rs "$RUNNER_TEMP/cronet-rs"
           git -C "$RUNNER_TEMP/cronet-rs" checkout "$CRONET_RS_REV"
@@ -263,7 +263,9 @@ jobs:
           # to main, or dispatch with empty version) -> rolling "latest".
           if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "$INPUT_VERSION" ]; then
             TAG_NAME="$INPUT_VERSION"
-            TITLE="$INPUT_VERSION"
+            # Versioned builds are immutable and leave the rolling release in place.
+            gh release create "$TAG_NAME" --target "$GITHUB_SHA" --latest=false --title "$TAG_NAME" --notes "SagerNet Cronet built from $GITHUB_SHA" release/*
+            exit 0
           else
             TAG_NAME="latest"
             TITLE="Latest Build"

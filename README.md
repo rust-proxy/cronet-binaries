@@ -14,6 +14,8 @@ bindings here. It produces:
 together with the C headers (`include/`) and the system link flags required to
 link the static library (`lib/<target>/link_flags.txt`).
 
+The Chromium 154 build uses SagerNet's `cronet-go-dev-v154` dialer ABI. Use matching 154 Rust bindings for these libraries.
+
 ## Supported Platforms
 
 | Target        | OS      | CPU     |

@@ -1,19 +1,13 @@
 name: Build
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Release tag'
-        type: string
-        required: false
   push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+    tags:
+      - '**'
+      - '!latest'
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 defaults:
@@ -24,6 +18,7 @@ jobs:
   # Read .github/target.toml and expose it as a matrix.include payload, so all
   # platforms share the single `build` job below.
   prepare:
+    if: ${{ !github.event.deleted }}
     runs-on: ubuntu-latest
     outputs:
       targets: ${{ steps.set.outputs.targets }}
@@ -181,8 +176,9 @@ jobs:
           cargo test --manifest-path "$coexist_manifest" --locked --target "$target"
 
   release-libs:
-    if: (github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'workflow_dispatch'
     needs: [build]
+    permissions:
+      contents: write
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -261,25 +257,10 @@ jobs:
           (cd release && sha256sum libcronet-* > SHA256SUMS)
           ls -la release/
 
-      - name: Push tag and create release
+      - name: Publish release for the pushed tag
         env:
           GH_TOKEN: ${{ github.token }}
-          EVENT_NAME: ${{ github.event_name }}
-          INPUT_VERSION: ${{ github.event.inputs.version }}
+          TAG_NAME: ${{ github.ref_name }}
         run: |
-          # workflow_dispatch with a version -> release that tag; otherwise (push
-          # to main, or dispatch with empty version) -> rolling "latest".
-          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "$INPUT_VERSION" ]; then
-            TAG_NAME="$INPUT_VERSION"
-            # Versioned builds are immutable and leave the rolling release in place.
-            gh release create "$TAG_NAME" --target "$GITHUB_SHA" --latest=false --title "$TAG_NAME" --notes "SagerNet Cronet built from $GITHUB_SHA" release/*
-            exit 0
-          else
-            TAG_NAME="latest"
-            TITLE="Latest Build"
-          fi
-          echo "Releasing tag: $TAG_NAME"
-          git tag -f "$TAG_NAME"
-          git push origin -f "$TAG_NAME"
-          gh release delete "$TAG_NAME" --yes 2>/dev/null || true
-          gh release create "$TAG_NAME" --title "$TITLE" --notes "" release/*
+          gh release create "$TAG_NAME" --verify-tag --latest=false \
+            --title "$TAG_NAME" --notes "SagerNet Cronet built from $GITHUB_SHA" release/*

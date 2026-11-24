@@ -16,6 +16,10 @@ link the static library (`lib/<target>/link_flags.txt`).
 
 The Chromium 154 build uses SagerNet's `cronet-go-dev-v154` dialer ABI. Use matching 154 Rust bindings for these libraries.
 
+Pushing a Git tag runs the build matrix and publishes the libraries and
+`SHA256SUMS` in a release with the same tag. The `latest` tag is reserved
+for the existing rolling release.
+
 ## Supported Platforms
 
 | Target        | OS      | CPU     |

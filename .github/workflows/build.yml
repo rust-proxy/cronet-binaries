@@ -111,6 +111,13 @@ jobs:
             sccache-${{ matrix.name }}-${{ hashFiles('scripts/*.rs') }}-
             sccache-${{ matrix.name }}-
 
+      # Chromium 154 builds a macOS 26 code path guarded by __builtin_available.
+      - name: Select the macOS 26 SDK for desktop targets
+        if: startsWith(matrix.target, 'darwin/')
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_26.3.app/Contents/Developer
+          xcrun --sdk macosx --show-sdk-version
+
       - name: Build
         run: |
           sccache -z
@@ -251,6 +258,7 @@ jobs:
             fi
           done
 
+          (cd release && sha256sum libcronet-* > SHA256SUMS)
           ls -la release/
 
       - name: Push tag and create release

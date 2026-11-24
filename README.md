@@ -22,23 +22,25 @@ for the existing rolling release.
 
 ## Supported Platforms
 
-| Target        | OS      | CPU     |
-|---------------|---------|---------|
-| android/386   | android | x86     |
-| android/amd64 | android | x64     |
-| android/arm   | android | arm     |
-| android/arm64 | android | arm64   |
-| darwin/amd64  | mac     | x64     |
-| darwin/arm64  | mac     | arm64   |
-| ios/arm64     | ios     | arm64   |
-| ios/amd64     | ios     | amd64   |
-| linux/386     | linux   | x86     |
-| linux/amd64   | linux   | x64     |
-| linux/arm     | linux   | arm     |
-| linux/arm64   | linux   | arm64   |
-| linux/loong64 | linux   | loong64 |
-| windows/amd64 | win     | x64     |
-| windows/arm64 | win     | arm64   |
+| Target        | OS      | CPU     | dynamic | static |
+|---------------|---------|---------|:-------:|:------:|
+| android/386   | android | x86     | —      | ✅     |
+| android/amd64 | android | x64     | —      | ✅     |
+| android/arm   | android | arm     | —      | ✅     |
+| android/arm64 | android | arm64   | —      | ✅     |
+| darwin/amd64  | mac     | x64     | —      | ✅     |
+| darwin/arm64  | mac     | arm64   | —      | ✅     |
+| ios/arm64     | ios     | arm64   | —      | ✅     |
+| ios/amd64     | ios     | amd64   | —      | ✅     |
+| linux/386     | linux   | x86     | ✅      | ✅     |
+| linux/amd64   | linux   | x64     | ✅      | ✅     |
+| linux/arm     | linux   | arm     | ✅      | ✅     |
+| linux/arm64   | linux   | arm64   | ✅      | ✅     |
+| linux/loong64 | linux   | loong64 | ✅      | ✅     |
+| windows/amd64 | win     | x64     | ✅      | ✅     |
+| windows/arm64 | win     | arm64   | ✅      | ✅     |
+
+On Linux, shared libraries require glibc. Static libraries are available for both glibc and musl.
 
 ## How it works
 

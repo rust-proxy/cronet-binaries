@@ -38,6 +38,7 @@ package target="" libc="":
     {{run}} package --target "{{target}}" --libc "{{libc}}"
 
 # Build all Apple platforms (macOS, iOS, tvOS, and simulators).
+# macOS and iOS additionally produce libcronet.dylib; tvOS stays static-only.
 apple:
     {{run}} build   --target "ios/arm64,ios/arm64/simulator,ios/amd64/simulator,tvos/arm64,tvos/arm64/simulator,tvos/amd64/simulator,darwin/arm64,darwin/amd64"
     {{run}} package --target "ios/arm64,ios/arm64/simulator,ios/amd64/simulator,tvos/arm64,tvos/arm64/simulator,tvos/amd64/simulator,darwin/arm64,darwin/amd64"

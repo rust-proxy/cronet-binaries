@@ -9,6 +9,9 @@
 #   target - passed to `just compile/package` (os/arch[/variant])
 #   name   - artifact name (must start with `cronet-`); also the cache suffix
 #   libc   - optional; "musl" for static musl Linux builds
+#   ci     - optional; also build on pull requests and branch pushes (tag
+#            builds always build every target). Keep this to a small set:
+#            each entry is a full Chromium build on a macOS runner.
 
 # ==================== Linux (glibc) ====================
 [[target]]
@@ -125,11 +128,16 @@ name = "cronet-darwin-amd64"
 os = "macos-15"
 target = "darwin/arm64"
 name = "cronet-darwin-arm64"
+# Continuously built on pull requests and branch pushes; the only Apple target
+# whose dylib can also be smoke-tested on the arm64 runner.
+ci = true
 
 [[target]]
 os = "macos-15"
 target = "ios/arm64"
 name = "cronet-ios-arm64"
+# Device slice of the iOS dylib, tested on pull requests and branch pushes.
+ci = true
 
 [[target]]
 os = "macos-15"

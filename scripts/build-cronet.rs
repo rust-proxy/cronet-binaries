@@ -8,10 +8,10 @@ edition = "2021"
 //! A faithful port of the former Go/bash tool. Depends only on the Rust
 //! standard library, so `cargo -Zscript` compiles it with no network access.
 //! It drives naiveproxy's get-clang.sh, then `gn gen` + `ninja`, and packages
-//! the resulting .a/.so/.dll into lib/ + include/.
+//! the resulting .a/.so/.dylib/.dll into lib/ + include/.
 //!
 //! Subcommands:
-//!   build              gn gen + ninja  -> libcronet.{a,so,dll}
+//!   build              gn gen + ninja  -> libcronet.{a,so,dylib,dll}
 //!   package            copy libs/headers into lib/ + include/, dump link flags
 //!   download-toolchain download clang + sysroot without building
 //!   env                print CC/CXX/CGO_LDFLAGS for cross-compiling consumers
@@ -217,6 +217,80 @@ fn lib_dir_name(t: &Target) -> String {
         n.push_str("_md");
     }
     n
+}
+
+// ---------------------------------------------------------------------------
+// Apple dynamic library
+// ---------------------------------------------------------------------------
+
+/// Mach-O symbols exported by the Apple dylib. Mach-O keeps the leading
+/// underscore, and everything outside the public C API must stay private so an
+/// embedding application can link another copy of Chromium or BoringSSL.
+const APPLE_EXPORTED_SYMBOLS: &str = "_Cronet_*\n_bidirectional_stream_*\n";
+
+/// Apple platforms that get a `libcronet.dylib`. tvOS keeps the static archive
+/// only, so the platform check must not be based on `is_ios` alone.
+fn apple_shared_library(t: &Target) -> bool {
+    t.os == "mac" || t.platform == "iphoneos"
+}
+
+fn write_apple_exports(src: &Path, outdir: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let dir = src.join(outdir);
+    fs::create_dir_all(&dir)?;
+    let path = dir.join("cronet_exports.txt");
+    if fs::read_to_string(&path).ok().as_deref() != Some(APPLE_EXPORTED_SYMBOLS) {
+        fs::write(&path, APPLE_EXPORTED_SYMBOLS)?;
+    }
+    Ok(())
+}
+
+/// Enable the existing `cronet` shared library for Apple, with an `@rpath`
+/// install name and an exported symbols list equivalent to the Linux version
+/// script. Applied in the build checkout, like the BoringSSL and Windows CRT
+/// patches, so the naiveproxy submodule stays clean.
+fn patched_cronet_gn(source: &str) -> Result<String, String> {
+    if source.contains("cronet_apple_exports") {
+        return Ok(source.to_owned());
+    }
+    let mut result = source.to_owned();
+
+    let args_anchor = "  # If set to true, this will remove histogram manager to reduce binary size.\n  disable_histogram_support = true\n}";
+    if result.matches(args_anchor).count() != 1 {
+        return Err("Cronet GN declare_args anchor changed".into());
+    }
+    result = result.replace(
+        args_anchor,
+        "  # If set to true, this will remove histogram manager to reduce binary size.\n  disable_histogram_support = true\n\n  # Optional Mach-O exported symbols list for the Apple shared library.\n  cronet_apple_exports = \"\"\n}",
+    );
+
+    let condition = "  if (is_win || is_linux) {\n    shared_library(\"cronet\") {";
+    if result.matches(condition).count() != 1 {
+        return Err("Cronet GN shared library condition changed".into());
+    }
+    result = result.replace(
+        condition,
+        "  if (is_win || is_linux || is_mac || is_ios) {\n    shared_library(\"cronet\") {",
+    );
+
+    let linux_ldflags = "      if (is_linux) {\n        inputs = [ \"cronet_exports.lst\" ]\n        ldflags =\n            [ \"-Wl,--version-script=\" + rebase_path(\"cronet_exports.lst\") ]\n      }";
+    if result.matches(linux_ldflags).count() != 1 {
+        return Err("Cronet GN Linux export anchor changed".into());
+    }
+    result = result.replace(
+        linux_ldflags,
+        "      if (is_linux) {\n        inputs = [ \"cronet_exports.lst\" ]\n        ldflags =\n            [ \"-Wl,--version-script=\" + rebase_path(\"cronet_exports.lst\") ]\n      }\n\n      # Apple dylibs need a stable @rpath install name, and the public C API\n      # must be selected with a Mach-O exported symbols list.\n      if (is_mac || is_ios) {\n        ldflags = [ \"-Wl,-install_name,@rpath/libcronet.dylib\" ]\n        if (cronet_apple_exports != \"\") {\n          ldflags += [\n            \"-Wl,-exported_symbols_list,\" +\n                rebase_path(cronet_apple_exports, root_build_dir),\n          ]\n        }\n      }",
+    );
+    Ok(result)
+}
+
+fn patch_cronet_gn(src: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let path = src.join("components/cronet/BUILD.gn");
+    let source = fs::read_to_string(&path)?.replace("\r\n", "\n");
+    let result = patched_cronet_gn(&source)?;
+    if result != source {
+        fs::write(path, result)?;
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -516,8 +590,16 @@ fn compile_target(src: &Path, t: &Target) {
         windows_crt::patch_gn(src).unwrap_or_else(|e| die(&format!("Windows CRT integration failed: {e}")));
     }
     let outdir = output_dir(t);
+    if apple_shared_library(t) {
+        patch_cronet_gn(src).unwrap_or_else(|e| die(&format!("Apple dylib GN integration failed: {e}")));
+        write_apple_exports(src, &outdir)
+            .unwrap_or_else(|e| die(&format!("Apple dylib export list generation failed: {e}")));
+    }
     let common_args = build_gn_args(src, t).join(" ");
-    let gn_args = format!("{common_args} cronet_boringssl_prefix=true");
+    let mut gn_args = format!("{common_args} cronet_boringssl_prefix=true");
+    if apple_shared_library(t) {
+        gn_args.push_str(&format!(" cronet_apple_exports=\"//{outdir}/cronet_exports.txt\""));
+    }
 
     let gn = if host_goos() == "windows" {
         src.join("gn/out/gn.exe")
@@ -558,7 +640,7 @@ fn compile_target(src: &Path, t: &Target) {
     });
     boringssl::verify_archive(src, &archive, matches!(t.goos.as_str(), "darwin" | "ios" | "tvos"))
         .unwrap_or_else(|e| die(&format!("BoringSSL isolation verification failed: {e}")));
-    if t.goos == "windows" || (t.goos == "linux" && t.libc != "musl") {
+    if t.goos == "windows" || (t.goos == "linux" && t.libc != "musl") || apple_shared_library(t) {
         log(&format!("ninja -C {outdir} cronet"));
         run(src, "ninja", &["-C", &outdir, "cronet"], &[]);
     }
@@ -692,6 +774,53 @@ mod tests {
         assert_eq!(flags.libs, ["-ldl", "-lpthread"]);
         assert_eq!(flags.ldflags, ["-Wl,-wrap,memcpy"]);
     }
+
+    #[test]
+    fn apple_dylibs_cover_macos_and_ios_but_not_tvos() {
+        for spec in ["darwin/amd64", "darwin/arm64", "ios/arm64", "ios/arm64/simulator", "ios/amd64"] {
+            assert!(apple_shared_library(&resolve_target(spec, "")), "{spec}");
+        }
+        for spec in ["tvos/arm64", "tvos/arm64/simulator", "tvos/amd64", "android/arm64", "linux/amd64", "windows/amd64"] {
+            assert!(!apple_shared_library(&resolve_target(spec, "")), "{spec}");
+        }
+        assert_eq!(lib_dir_name(&resolve_target("ios/amd64", "")), "ios_amd64_simulator");
+        assert_eq!(lib_dir_name(&resolve_target("darwin/arm64", "")), "darwin_arm64");
+    }
+
+    #[test]
+    fn apple_gn_patch_adds_an_rpath_dylib_with_public_api_exports() {
+        let source = concat!(
+            "declare_args() {\n",
+            "  # If set to true, this will remove histogram manager to reduce binary size.\n",
+            "  disable_histogram_support = true\n",
+            "}\n",
+            "\n",
+            "  if (is_win || is_linux) {\n",
+            "    shared_library(\"cronet\") {\n",
+            "      sources = [ \"cronet_global_state_stubs.cc\" ]\n",
+            "\n",
+            "      if (is_linux) {\n",
+            "        inputs = [ \"cronet_exports.lst\" ]\n",
+            "        ldflags =\n",
+            "            [ \"-Wl,--version-script=\" + rebase_path(\"cronet_exports.lst\") ]\n",
+            "      }\n",
+            "    }\n",
+            "  }\n",
+        );
+        let result = patched_cronet_gn(source).unwrap();
+        assert!(result.contains("if (is_win || is_linux || is_mac || is_ios)"));
+        assert!(result.contains("cronet_apple_exports = \"\""));
+        assert!(result.contains("\"-Wl,-install_name,@rpath/libcronet.dylib\""));
+        assert!(result.contains("\"-Wl,-exported_symbols_list,\""));
+        assert!(result.contains("rebase_path(cronet_apple_exports, root_build_dir)"));
+        assert_eq!(patched_cronet_gn(&result).unwrap(), result);
+        assert!(patched_cronet_gn(&source.replace("shared_library(\"cronet\")", "shared_library(\"renamed\")")).is_err());
+    }
+
+    #[test]
+    fn apple_export_list_keeps_only_the_public_c_api() {
+        assert_eq!(APPLE_EXPORTED_SYMBOLS, "_Cronet_*\n_bidirectional_stream_*\n");
+    }
 }
 
 fn write_link_flags(src: &Path, t: &Target, td: &Path, outdir: &str) {
@@ -729,6 +858,19 @@ fn write_link_flags(src: &Path, t: &Target, td: &Path, outdir: &str) {
     log(&format!("Wrote link flags for {}", format_target(t)));
 }
 
+/// Ad-hoc sign a packaged Mach-O dylib. Apple silicon refuses to map unsigned
+/// code, so the installer copy must carry at least an ad-hoc signature. Apps
+/// embedding the dylib replace it with their own signature.
+fn adhoc_sign(path: &Path) {
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "libcronet.dylib".to_string());
+    log(&format!("codesign --force --sign - {name}"));
+    run(dir, "codesign", &["--force", "--sign", "-", &name], &[]);
+}
+
 fn package_target(root: &Path, src: &Path, t: &Target) {
     let name = lib_dir_name(t);
     let td = root.join("lib").join(&name);
@@ -763,6 +905,18 @@ fn package_target(root: &Path, src: &Path, t: &Target) {
         if so.is_file() {
             copy_file(&so, &td.join("libcronet.so"));
             log(&format!("Copied shared library for {}", format_target(t)));
+        }
+    }
+
+    if apple_shared_library(t) {
+        let dylib = src.join(&outdir).join("libcronet.dylib");
+        if dylib.is_file() {
+            let dest = td.join("libcronet.dylib");
+            copy_file(&dylib, &dest);
+            adhoc_sign(&dest);
+            log(&format!("Copied shared library for {}", format_target(t)));
+        } else {
+            log(&format!("Warning: dylib not found for {}, skipping", format_target(t)));
         }
     }
 
@@ -817,7 +971,11 @@ fn print_config(src: &Path, t: &Target) {
     );
     println!("output_dir:   {}", output_dir(t));
     println!("lib_dir_name: {}", lib_dir_name(t));
-    println!("gn_args:      {}", build_gn_args(src, t).join(" "));
+    let mut args = build_gn_args(src, t);
+    if apple_shared_library(t) {
+        args.push(format!("cronet_apple_exports=\"//{}/cronet_exports.txt\"", output_dir(t)));
+    }
+    println!("gn_args:      {}", args.join(" "));
 }
 
 // ---------------------------------------------------------------------------

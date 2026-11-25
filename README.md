@@ -8,6 +8,7 @@ bindings here. It produces:
 
 - `libcronet.a`  — static library (Linux glibc/musl, macOS, iOS, tvOS, Android)
 - `libcronet.so` — shared library (Linux glibc)
+- `libcronet.dylib` — shared library (macOS, iOS)
 - `cronet.lib`  — static library (Windows MSVC)
 - `libcronet.dll`— shared library (Windows)
 
@@ -20,6 +21,13 @@ Pushing a Git tag runs the build matrix and publishes the libraries and
 `SHA256SUMS` in a release with the same tag. The `latest` tag is reserved
 for the existing rolling release.
 
+Pull requests and pushes to `main` run the same build job for the continuously
+tested Apple targets (`ci = true` in [target.toml](.github/target.toml),
+currently macOS arm64 and iOS arm64): both dylibs are built and checked for
+their install name and exported symbols, and the macOS arm64 dylib is linked
+and executed by [`tests/dylib-smoke.c`](tests/dylib-smoke.c). These runs never
+publish a release; only tag pushes do.
+
 ## Supported Platforms
 
 | Target        | OS      | CPU     | dynamic | static |
@@ -28,10 +36,10 @@ for the existing rolling release.
 | android/amd64 | android | x64     | —      | ✅     |
 | android/arm   | android | arm     | —      | ✅     |
 | android/arm64 | android | arm64   | —      | ✅     |
-| darwin/amd64  | mac     | x64     | —      | ✅     |
-| darwin/arm64  | mac     | arm64   | —      | ✅     |
-| ios/arm64     | ios     | arm64   | —      | ✅     |
-| ios/amd64     | ios     | amd64   | —      | ✅     |
+| darwin/amd64  | mac     | x64     | ✅      | ✅     |
+| darwin/arm64  | mac     | arm64   | ✅      | ✅     |
+| ios/arm64     | ios     | arm64   | ✅      | ✅     |
+| ios/amd64     | ios     | amd64   | ✅      | ✅     |
 | linux/386     | linux   | x86     | ✅      | ✅     |
 | linux/amd64   | linux   | x64     | ✅      | ✅     |
 | linux/arm     | linux   | arm     | ✅      | ✅     |
@@ -41,6 +49,8 @@ for the existing rolling release.
 | windows/arm64 | win     | arm64   | ✅      | ✅     |
 
 On Linux, shared libraries require glibc. Static libraries are available for both glibc and musl.
+The macOS and iOS shared libraries are plain Mach-O dylibs; an iOS app must embed and
+re-sign `libcronet.dylib` inside the app bundle. tvOS stays static-only.
 
 ## How it works
 
@@ -59,7 +69,7 @@ No Go.
 | Recipe                          | Purpose                                                        |
 |---------------------------------|----------------------------------------------------------------|
 | `just build [target] [libc]`    | `compile` + `package` in one go                                |
-| `just compile [target] [libc]`  | `gn gen` + `ninja` → produce `libcronet.{a,so,dll}`            |
+| `just compile [target] [libc]`  | `gn gen` + `ninja` → produce `libcronet.{a,so,dylib,dll}`       |
 | `just package [target] [libc]`  | Copy libs to `lib/` and headers to `include/`, dump link flags |
 | `just apple`                    | Build every Apple platform                                     |
 | `just download-toolchain …`     | Download clang + sysroot without building                      |
@@ -88,6 +98,7 @@ Outputs land in:
 ```
 lib/<os>_<arch>/libcronet.a        # static lib
 lib/<os>_<arch>/libcronet.so       # Linux glibc shared lib
+lib/<os>_<arch>/libcronet.dylib    # macOS / iOS shared lib
 lib/<os>_<arch>/libcronet.dll      # Windows shared lib
 lib/<os>_<arch>/link_flags.txt     # system libs/frameworks needed to link .a
 include/*.h                        # C headers
@@ -124,14 +135,27 @@ just build linux/amd64 musl
 cc myapp.c -Iinclude lib/linux_amd64/libcronet.a $(cat lib/linux_amd64/link_flags.txt | grep -v '^#')
 ```
 
-On Windows / for dynamic linking, ship `libcronet.dll` / `libcronet.so` next to
-your executable.
+On Windows / for dynamic linking, ship `libcronet.dll` / `libcronet.so` /
+`libcronet.dylib` next to your executable.
 
 Linux release archives use `libcronet-linux-<arch>.a` (glibc) and
 `libcronet-linux-<arch>_musl.a` (musl). Windows MSVC archives use
 `libcronet-windows-<arch>.lib`; these are real static archives, not DLL import
-libraries. Matching `.link-flags.txt` assets record native linker dependencies.
-Existing `.so` and `.dll` assets remain available for dynamic consumers.
+libraries. Apple releases use `libcronet-darwin-<arch>.a` /
+`libcronet-ios-<variant>.a` for static linking and the matching `.dylib` assets
+for dynamic loading. Matching `.link-flags.txt` assets record native linker
+dependencies. Existing `.so`, `.dylib` and `.dll` assets remain available for
+dynamic consumers.
+
+macOS and iOS shared libraries carry the install name
+`@rpath/libcronet.dylib` and export only the public C API (`Cronet_*` and
+`bidirectional_stream_*`); all other Chromium, libc++ and prefixed BoringSSL
+symbols stay private to the dylib. Packaged dylibs are ad-hoc signed
+(`codesign --force --sign -`) because Apple silicon refuses to map unsigned
+code. On macOS the dylib can be loaded from a normal search path or with an
+explicit path. iOS does not provide such search paths, so an app must embed
+`libcronet.dylib` in its bundle (for example under `Frameworks/`) and let Xcode
+re-sign it; load it by its absolute path inside the bundle.
 
 Windows provides both CRT variants of the complete static Cronet archive:
 

@@ -1,10 +1,24 @@
 name: Build
 
+# Tag pushes build every target and publish a release. Pull requests, branch
+# pushes, and manual runs continuously test the Apple dylib targets marked with
+# `ci = true` in .github/target.toml, including a runtime smoke test on macOS.
 on:
   push:
+    branches: [main]
+    paths-ignore:
+      - 'README.md'
+      - 'LICENSE'
+      - '.gitignore'
     tags:
       - '**'
       - '!latest'
+  pull_request:
+    paths-ignore:
+      - 'README.md'
+      - 'LICENSE'
+      - '.gitignore'
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -39,14 +53,28 @@ jobs:
       - name: Build matrix from target.toml
         id: set
         run: |
-          targets=$(toml2json .github/target.toml | jaq -c '.target')
+          # Tag pushes publish every target; other events continuously test the
+          # small Apple set so pipeline changes are exercised without a release.
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            release=true
+            targets=$(toml2json .github/target.toml | jaq -c '.target')
+          else
+            release=false
+            targets=$(toml2json .github/target.toml | jaq -c '[.target[] | select(.ci)]')
+          fi
+          if [[ "$targets" == "[]" ]]; then
+            echo "target matrix is empty" >&2
+            exit 1
+          fi
+          echo "release=$release" >> "$GITHUB_OUTPUT"
           echo "targets=$targets" >> "$GITHUB_OUTPUT"
-          # Split the 10 GiB GHA cache quota evenly across targets so their
+          # Split the 10 GiB GHA cache quota evenly across ALL targets so their
           # per-target sccache caches coexist instead of LRU-evicting each other.
-          count=$(echo "$targets" | jaq 'length')
+          # The split stays constant between test and release runs.
+          count=$(toml2json .github/target.toml | jaq '.target | length')
           size=$(( 10240 / count ))
           echo "sccache_size=${size}M" >> "$GITHUB_OUTPUT"
-          echo "targets: $count -> sccache size per target: ${size}M"
+          echo "release: $release, targets: $(echo "$targets" | jaq 'length') of $count -> sccache size per target: ${size}M"
           echo "$targets" | jaq .
 
   build:
@@ -131,6 +159,46 @@ jobs:
       - name: Package
         run: just package "${{ matrix.target }}" "${{ matrix.libc }}"
 
+      # Apple builds must produce a loadable dylib whose dynamic symbol table
+      # exposes only Cronet's public C API.
+      - name: Verify the Apple shared library
+        if: startsWith(matrix.target, 'darwin/') || startsWith(matrix.target, 'ios/')
+        run: |
+          dylib=$(find lib -name libcronet.dylib -print -quit)
+          test -n "$dylib"
+          test -f "$(dirname "$dylib")/libcronet.a"
+          codesign --verify --verbose=2 "$dylib"
+          otool -D "$dylib" | grep -x '@rpath/libcronet.dylib'
+          symbols=$(nm -gU "$dylib" | awk '{print $NF}')
+          echo "$symbols" | grep -x '_Cronet_Engine_Create'
+          leaked=$(echo "$symbols" | grep -E '^(_SSL_new|__ZN4bssl|__ZN3net|__ZN4base)' || true)
+          if [ -n "$leaked" ]; then
+            echo "unexpected exported symbols:" >&2
+            echo "$leaked" >&2
+            exit 1
+          fi
+
+      # Link and run a real client against the dylib. Only the slice matching
+      # the runner's architecture can execute; the other Apple targets are
+      # still verified statically above.
+      - name: Smoke-test the macOS shared library
+        if: startsWith(matrix.target, 'darwin/')
+        run: |
+          host=$(uname -m)
+          case "$host" in
+            arm64) host=arm64 ;;
+            x86_64) host=amd64 ;;
+          esac
+          if [[ "${{ matrix.target }}" != "darwin/${host}" ]]; then
+            echo "skipping: ${host} runner cannot execute ${{ matrix.target }}"
+            exit 0
+          fi
+          dylib=$(find lib -name libcronet.dylib -print -quit)
+          libdir=$(cd "$(dirname "$dylib")" && pwd)
+          cc tests/dylib-smoke.c -Iinclude "$dylib" \
+            -Wl,-rpath,"$libdir" -o "$RUNNER_TEMP/cronet-smoke"
+          "$RUNNER_TEMP/cronet-smoke"
+
       # Keep artifacts available for diagnosis; release-libs still requires
       # every build job, including its consumer checks, to succeed.
       - uses: actions/upload-artifact@v4
@@ -177,6 +245,9 @@ jobs:
 
   release-libs:
     needs: [build]
+    # Continuous-testing runs (pull requests, branch pushes) build and verify
+    # the libraries but must never publish a release.
+    if: startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write
     runs-on: ubuntu-22.04
@@ -230,19 +301,25 @@ jobs:
             fi
           done
 
-          # Darwin (macOS) static libraries (.a)
+          # Darwin (macOS) static and shared libraries
           for dir in artifacts/cronet-darwin-*/lib/darwin_*; do
             ARCH=$(basename "$dir" | sed 's/darwin_//')
             if [ -f "$dir/libcronet.a" ]; then
               cp "$dir/libcronet.a" "release/libcronet-darwin-${ARCH}.a"
             fi
+            if [ -f "$dir/libcronet.dylib" ]; then
+              cp "$dir/libcronet.dylib" "release/libcronet-darwin-${ARCH}.dylib"
+            fi
           done
 
-          # iOS static libraries (.a)
+          # iOS static and shared libraries
           for dir in artifacts/cronet-ios-*/lib/ios_*; do
             SUBDIR=$(basename "$dir" | sed 's/^ios_//')
             if [ -f "$dir/libcronet.a" ]; then
               cp "$dir/libcronet.a" "release/libcronet-ios-${SUBDIR}.a"
+            fi
+            if [ -f "$dir/libcronet.dylib" ]; then
+              cp "$dir/libcronet.dylib" "release/libcronet-ios-${SUBDIR}.dylib"
             fi
           done
 
